@@ -42,8 +42,7 @@ wired.
 
 - Arduino IDE 2.x or Arduino CLI
 - Espressif ESP32 Arduino core 3.3.x
-- The following libraries from
-  `resource-pack/1-Demo/Arduino/Install libraries`:
+- The following libraries from `libraries`:
   - `Adafruit_NeoPixel`
   - `ST77922`
   - `ST77922_TOUCH`
@@ -72,7 +71,7 @@ From the repository root in PowerShell:
 ```powershell
 arduino-cli compile `
   --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc" `
-  --libraries ".\resource-pack\1-Demo\Arduino\Install libraries" `
+  --libraries ".\libraries" `
   --output-dir ".\build\v1-onboard" `
   ".\src\ColorController"
 ```
@@ -118,7 +117,7 @@ Build with GPIO 45 and the required pixel count:
 ```powershell
 arduino-cli compile `
   --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc" `
-  --libraries ".\resource-pack\1-Demo\Arduino\Install libraries" `
+  --libraries ".\libraries" `
   --output-dir ".\build\v2-p2-gpio45-60pixels" `
   --build-property "compiler.cpp.extra_flags=-DCOLOR_CONTROLLER_PIXEL_PIN=45 -DCOLOR_CONTROLLER_PIXEL_COUNT=60" `
   ".\src\ColorController"
