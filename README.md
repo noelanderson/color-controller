@@ -90,7 +90,10 @@ Required board settings:
 
 ## Arduino CLI build
 
-From the repository root in PowerShell:
+### Standard build
+
+Use the original Arduino CLI command in environments where the packaged ESP32
+tools are permitted to run. From the repository root in PowerShell:
 
 ```powershell
 arduino-cli compile `
@@ -99,6 +102,27 @@ arduino-cli compile `
   --output-dir ".\build\onboard-only" `
   ".\src\ColorController"
 ```
+
+Run only one raw `arduino-cli compile` for this sketch at a time because
+Arduino's default incremental cache is shared. Use the PowerShell wrapper below
+when multiple terminals or automated tools might build concurrently.
+
+### Windows Application Control fallback
+
+If the standard command fails with `Failed to load Python DLL` because Windows
+Application Control blocks Arduino's packaged Python executables, use:
+
+```powershell
+.\tools\build-firmware.ps1
+```
+
+The script avoids Windows Application Control failures from Arduino's packaged
+Python executables and uses a repository-local build cache to avoid shared-cache
+locks. It serializes concurrent builds and automatically cleans an interrupted
+or incomplete build before reusing the cache. It requires the Python `esptool` package; if needed, run
+`python -m pip install esptool`. Pass `-Clean` to discard the build cache. To
+build for an external array, pass its pixel count, for example
+`.\tools\build-firmware.ps1 -ExternalPixelCount 60`.
 
 This builds with the external array disabled (onboard NeoPixel only). To also
 drive an external array on P2, add:
@@ -111,9 +135,17 @@ Replace `60` with the array's pixel count. See
 [Driving an external NeoPixel array on P2](#driving-an-external-neopixel-array-on-p2)
 below.
 
-To upload, add `--upload --port COMx` and replace `COMx` with the board's port.
+To build and flash in one step over COM8:
 
-For example, to build and flash in one step over COM8:
+```powershell
+.\tools\build-firmware.ps1 -Port COM8
+```
+
+For policy-restricted Windows systems, the script compiles first and then uses
+`python -m esptool` to flash the verified merged image at address `0x0`,
+bypassing Arduino's packaged `flasher.exe` and `esptool.exe`.
+
+In an environment without the Python block, the equivalent standard command is:
 
 ```powershell
 arduino-cli compile `
@@ -143,6 +175,17 @@ expects one complete binary.
 OPI PSRAM is required for the approximately 307 KB RGB565 framebuffer and the
 vendor display driver's full-frame transfer buffer. The sketch stops with a
 fatal Serial message if the framebuffer cannot be allocated.
+
+## CI/CD firmware artifact
+
+The [Build firmware workflow](.github/workflows/build-firmware.yml) runs for
+pushes to `main`, pull requests, and manual dispatches. It installs ESP32 Arduino
+core 3.3.12, compiles the onboard-only firmware, verifies the merged image, and
+publishes `ColorController.ino.merged.bin` as a 30-day GitHub Actions artifact
+named `color-controller-merged-<commit-sha>`.
+
+The merged binary contains the bootloader, partition table, and application and
+is intended for tools that flash a complete image at address `0x0`.
 
 ## Host-side tests
 

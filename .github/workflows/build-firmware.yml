@@ -1,0 +1,52 @@
+name: Build firmware
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ESP32-S3 firmware
+    runs-on: ubuntu-latest
+    env:
+      ESP32_INDEX_URL: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core
+        run: |
+          arduino-cli core update-index --additional-urls "$ESP32_INDEX_URL"
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls "$ESP32_INDEX_URL"
+
+      - name: Compile firmware
+        run: |
+          mkdir -p build/ci
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc" \
+            --libraries "./libraries" \
+            --output-dir "./build/ci" \
+            "./src/ColorController"
+
+      - name: Verify merged binary
+        run: |
+          test -f build/ci/ColorController.ino.merged.bin
+          sha256sum build/ci/ColorController.ino.merged.bin
+
+      - name: Publish combined binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: color-controller-merged-${{ github.sha }}
+          path: build/ci/ColorController.ino.merged.bin
+          if-no-files-found: error
+          retention-days: 30

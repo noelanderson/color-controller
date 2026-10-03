@@ -80,6 +80,8 @@ uint32_t savedFeedbackUntil = 0;
 int16_t markerX = -1;
 int16_t markerY = -1;
 uint32_t lastEffectFrame = 0;
+uint32_t lastEffectUiFrame = 0;
+RgbColor effectPreviewColor = {255, 0, 0};
 
 // Converts model RGB values to the display framebuffer's RGB565 format.
 uint16_t toRgb565(const RgbColor& color) {
@@ -136,6 +138,7 @@ void applyPixelOutput(uint32_t now = millis()) {
   if (model.mode() == OutputMode::kRainbow) {
     const uint8_t brightness = scaleBrightness(
         model.brightness(), breathingIntensity(now, Config::kRainbowBreathMs));
+    effectPreviewColor = rainbowColor(now, Config::kRainbowCycleMs, 0, 1);
     writeRainbowPixels(onboardPixel, now, brightness);
     if (Config::kExternalPixelCount > 0) {
       writeRainbowPixels(externalPixels, now, brightness);
@@ -152,6 +155,7 @@ void applyPixelOutput(uint32_t now = millis()) {
     const uint8_t brightness =
         scaleBrightness(model.brightness(), musicIntensity(level));
     const RgbColor color = musicColor(now, level);
+    effectPreviewColor = color;
     writeSolidPixels(onboardPixel, color, brightness);
     if (Config::kExternalPixelCount > 0) {
       writeSolidPixels(externalPixels, color, brightness);
@@ -159,6 +163,7 @@ void applyPixelOutput(uint32_t now = millis()) {
     return;
   }
 
+  effectPreviewColor = model.selected();
   writeSolidPixels(onboardPixel, model.selected(), model.brightness());
   if (Config::kExternalPixelCount > 0) {
     writeSolidPixels(externalPixels, model.selected(), model.brightness());
@@ -174,7 +179,9 @@ void drawCenteredText(const char* text, int16_t centerX, int16_t centerY,
 }
 
 void drawColorStrip() {
-  canvas.fillRect(0, 0, Ui::kWidth, Ui::kColorStripHeight, toRgb565(model.selected()));
+  const RgbColor& color =
+      model.mode() == OutputMode::kSolid ? model.selected() : effectPreviewColor;
+  canvas.fillRect(0, 0, Ui::kWidth, Ui::kColorStripHeight, toRgb565(color));
   canvas.drawFastHLine(0, Ui::kColorStripHeight - 1, Ui::kWidth, Ui::kWhite);
 }
 
@@ -239,15 +246,15 @@ void drawControl(uint8_t index) {
 
   if (index == ControllerModel::kRainbowControlIndex) {
     canvas.fillRoundRect(x, y, Ui::kPresetWidth, Ui::kPresetHeight, 8, Ui::kBlack);
-    constexpr uint8_t kBands = 12;
-    for (uint8_t band = 0; band < kBands; ++band) {
+    constexpr uint8_t kDots = 6;
+    for (uint8_t dot = 0; dot < kDots; ++dot) {
       const RgbColor color =
-          hsvToRgb({static_cast<uint16_t>(band * 360 / kBands), 255, 255});
-      const int16_t bandX = x + 4 + band * (Ui::kPresetWidth - 8) / kBands;
-      const int16_t nextX =
-          x + 4 + (band + 1) * (Ui::kPresetWidth - 8) / kBands;
-      canvas.fillRect(bandX, y + 4, nextX - bandX, Ui::kPresetHeight - 8,
-                      toRgb565(color));
+          hsvToRgb({static_cast<uint16_t>(dot * 300 / (kDots - 1)), 255, 255});
+      const int16_t dotX = x + 18 + dot * 12;
+      const int16_t distanceFromCenter = abs(static_cast<int16_t>(dot) * 2 -
+                                             (kDots - 1));
+      const int16_t dotY = y + 25 + distanceFromCenter;
+      canvas.fillCircle(dotX, dotY, 7, toRgb565(color));
     }
     const uint16_t outline =
         model.mode() == OutputMode::kRainbow ? Ui::kActive : Ui::kWhite;
@@ -256,8 +263,6 @@ void drawControl(uint8_t index) {
       canvas.drawRoundRect(x + 2, y + 2, Ui::kPresetWidth - 4,
                            Ui::kPresetHeight - 4, 6, outline);
     }
-    drawCenteredText("P5 RAINBOW", x + Ui::kPresetWidth / 2,
-                     y + Ui::kPresetHeight / 2, Ui::kWhite, Ui::kBlack, 1);
     return;
   }
 
@@ -270,12 +275,16 @@ void drawControl(uint8_t index) {
       canvas.drawRoundRect(x + 2, y + 2, Ui::kPresetWidth - 4,
                            Ui::kPresetHeight - 4, 6, outline);
     }
-    const int16_t noteX = x + Ui::kPresetWidth / 2 + 5;
-    const int16_t noteY = y + 16;
-    canvas.fillRect(noteX, noteY, 4, 23, Ui::kWhite);
-    canvas.fillRect(noteX, noteY, 17, 4, Ui::kWhite);
-    canvas.fillCircle(noteX - 5, noteY + 24, 7, Ui::kWhite);
-    canvas.fillCircle(noteX + 12, noteY + 17, 7, Ui::kWhite);
+    const int16_t headX = x + Ui::kPresetWidth / 2 - 7;
+    const int16_t headY = y + 37;
+    const int16_t stemX = headX + 6;
+    const int16_t stemTop = y + 12;
+    canvas.fillCircle(headX, headY, 8, Ui::kWhite);
+    canvas.fillRect(stemX, stemTop, 4, headY - stemTop, Ui::kWhite);
+    for (uint8_t offset = 0; offset < 4; ++offset) {
+      canvas.drawLine(stemX + 3, stemTop + offset, stemX + 20,
+                      stemTop + 8 + offset, Ui::kWhite);
+    }
     if (!AudioFeedback::microphoneAvailable()) {
       canvas.fillCircle(x + Ui::kPresetWidth - 10, y + 10, 4, Ui::kRed);
     }
@@ -338,7 +347,9 @@ void drawBrightnessControl() {
       Ui::kSliderStartX +
       static_cast<int32_t>(model.brightness()) *
           (Ui::kSliderEndX - Ui::kSliderStartX) / 255;
-  canvas.fillCircle(knobX, Ui::kSliderY, 11, toRgb565(model.selected()));
+  const RgbColor& color =
+      model.mode() == OutputMode::kSolid ? model.selected() : effectPreviewColor;
+  canvas.fillCircle(knobX, Ui::kSliderY, 11, toRgb565(color));
   canvas.drawCircle(knobX, Ui::kSliderY, 11, Ui::kWhite);
 }
 
@@ -474,6 +485,7 @@ void handleTouchUp() {
       musicEnvelope.reset();
     }
     lastEffectFrame = millis();
+    lastEffectUiFrame = lastEffectFrame;
     applyPixelOutput(lastEffectFrame);
     drawDynamicUi();
     AudioFeedback::beep();
@@ -548,6 +560,13 @@ void loop() {
       now - lastEffectFrame >= Config::kEffectFrameMs) {
     lastEffectFrame = now;
     applyPixelOutput(now);
+  }
+  if (model.mode() != OutputMode::kSolid &&
+      now - lastEffectUiFrame >= Config::kEffectUiFrameMs) {
+    lastEffectUiFrame = now;
+    drawColorStrip();
+    drawBrightnessControl();
+    flushDisplay();
   }
 
   if (savedPreset >= 0 &&

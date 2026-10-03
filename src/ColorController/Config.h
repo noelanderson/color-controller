@@ -33,6 +33,7 @@ constexpr uint16_t kAudioBeepFrequencyHz = 1800;
 constexpr uint32_t kAudioBeepDurationMs = 70;
 constexpr uint32_t kAudioBeepGapMs = 50;
 constexpr uint32_t kEffectFrameMs = 25;
+constexpr uint32_t kEffectUiFrameMs = 200;
 constexpr uint32_t kRainbowCycleMs = 12000;
 constexpr uint32_t kRainbowBreathMs = 5000;
 

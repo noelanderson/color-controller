@@ -45,11 +45,7 @@ cl /std:c++17 /EHsc `
 Firmware build:
 
 ```powershell
-arduino-cli compile `
-  --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc" `
-  --libraries ".\libraries" `
-  --output-dir ".\build\onboard-only" `
-  ".\src\ColorController"
+.\tools\build-firmware.ps1
 ```
 
 Do not upload firmware unless the user explicitly requests it and provides the
