@@ -38,6 +38,10 @@
 #define TOUCH_RST  48
 #define TOUCH_INT  47
 
+// Shared bus handle so other devices (e.g. an audio codec) on the same
+// SDA/SCL pins can be added without creating a second, conflicting bus.
+extern i2c_master_bus_handle_t g_touchI2CBus;
+
 
 //Pin operation
 #if ((TOUCH_RST>=0) && (TOUCH_RST<32))

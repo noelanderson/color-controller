@@ -4,6 +4,7 @@
 #include <ST77922_Touch.h>
 #include <TFT_eSPI.h>
 
+#include "AudioFeedback.h"
 #include "ColorMath.h"
 #include "Config.h"
 #include "ControllerModel.h"
@@ -351,6 +352,7 @@ void updatePresetHold(uint32_t now) {
     }
     drawPreset(touchState.presetIndex);
     flushDisplay();
+    AudioFeedback::beepLong();
   }
 }
 
@@ -365,6 +367,7 @@ void handleTouchUp() {
       applyPixelOutput();
       drawDynamicUi();
     }
+    AudioFeedback::beep();
   } else if (touchState.target == TouchTarget::kPower &&
              contains(touchState.lastX, touchState.lastY, Ui::kPowerX, Ui::kPowerY,
                       Ui::kPowerWidth, Ui::kPowerHeight)) {
@@ -372,6 +375,7 @@ void handleTouchUp() {
     applyPixelOutput();
     drawPowerControl();
     flushDisplay();
+    AudioFeedback::beep();
   } else {
     presetGesture.reset();
   }
@@ -384,6 +388,10 @@ void setup() {
   display.Set_Rotation(Config::kDisplayRotation);
   touch.init();
   touch.Set_Rotation(Config::kDisplayRotation);
+
+  if (!AudioFeedback::begin(g_touchI2CBus)) {
+    Serial.println("WARNING: audio codec init failed; beeps disabled");
+  }
 
   canvas.setColorDepth(16);
   if (canvas.createSprite(Ui::kWidth, Ui::kHeight) == nullptr) {

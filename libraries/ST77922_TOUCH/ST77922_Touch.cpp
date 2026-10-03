@@ -1,6 +1,7 @@
 #include "ST77922_Touch.h"
 
 i2c_master_dev_handle_t touch_handle;
+i2c_master_bus_handle_t g_touchI2CBus;
 
 ST77922_TOUCH::ST77922_TOUCH(void)
 {
@@ -8,8 +9,7 @@ ST77922_TOUCH::ST77922_TOUCH(void)
 	height = TOUCH_HEIGHT;
 	rotation = 0;
 	max_points = 0;
-	i2c_master_bus_handle_t bus_handle;
-    i2c_master_bus_config_t touch_i2c_cfg = {
+	i2c_master_bus_config_t touch_i2c_cfg = {
         .i2c_port = I2C_NUM,
 		.sda_io_num = TOUCH_SDA,
         .scl_io_num = TOUCH_SCL, 
@@ -20,13 +20,13 @@ ST77922_TOUCH::ST77922_TOUCH(void)
         	.enable_internal_pullup = true,
         }
     };
-    i2c_new_master_bus(&touch_i2c_cfg, &bus_handle);
+    i2c_new_master_bus(&touch_i2c_cfg, &g_touchI2CBus);
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = TOUCH_ADDR,
         .scl_speed_hz = I2C_SPEED,
     };
-    i2c_master_bus_add_device(bus_handle, &dev_config, &touch_handle);
+    i2c_master_bus_add_device(g_touchI2CBus, &dev_config, &touch_handle);
 }
 
 void ST77922_TOUCH::init(void)
