@@ -205,12 +205,12 @@ void drawPresets() {
 }
 
 void drawPowerControl() {
-  const uint16_t fill = model.powerOn() ? Ui::kGreen : Ui::kRed;
+  const uint16_t fill = model.powerOn() ? Ui::kRed : Ui::kGreen;
   canvas.fillRoundRect(Ui::kPowerX, Ui::kPowerY, Ui::kPowerWidth, Ui::kPowerHeight, 9,
                        fill);
   canvas.drawRoundRect(Ui::kPowerX, Ui::kPowerY, Ui::kPowerWidth, Ui::kPowerHeight, 9,
                        Ui::kWhite);
-  drawCenteredText(model.powerOn() ? "ON" : "OFF", Ui::kPowerX + Ui::kPowerWidth / 2,
+  drawCenteredText(model.powerOn() ? "OFF" : "ON", Ui::kPowerX + Ui::kPowerWidth / 2,
                    Ui::kPowerY + Ui::kPowerHeight / 2, Ui::kWhite, fill);
 }
 
