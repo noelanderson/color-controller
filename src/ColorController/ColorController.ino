@@ -61,7 +61,10 @@ TFT_eSPI frameBufferHost;
 TFT_eSprite canvas(&frameBufferHost);
 ST77922 display;
 ST77922_TOUCH touch;
-Adafruit_NeoPixel pixels(Config::kPixelCount, Config::kPixelPin, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel onboardPixel(Config::kOnboardPixelCount, Config::kOnboardPixelPin,
+                              NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel externalPixels(Config::kExternalPixelCount, Config::kExternalPixelPin,
+                                NEO_GRB + NEO_KHZ800);
 ControllerModel model;
 TouchState touchState;
 PresetGesture presetGesture;
@@ -98,12 +101,21 @@ void flushDisplay() {
 void applyPixelOutput() {
   // Set brightness before rewriting pixels because Adafruit_NeoPixel rescales
   // its existing buffer when brightness changes.
-  pixels.setBrightness(model.brightness());
+  onboardPixel.setBrightness(model.brightness());
   const RgbColor output = model.powerOn() ? model.selected() : RgbColor{0, 0, 0};
-  for (uint16_t index = 0; index < pixels.numPixels(); ++index) {
-    pixels.setPixelColor(index, output.red, output.green, output.blue);
+  for (uint16_t index = 0; index < onboardPixel.numPixels(); ++index) {
+    onboardPixel.setPixelColor(index, output.red, output.green, output.blue);
   }
-  pixels.show();
+  onboardPixel.show();
+
+  if (Config::kExternalPixelCount == 0) {
+    return;
+  }
+  externalPixels.setBrightness(model.brightness());
+  for (uint16_t index = 0; index < externalPixels.numPixels(); ++index) {
+    externalPixels.setPixelColor(index, output.red, output.green, output.blue);
+  }
+  externalPixels.show();
 }
 
 void drawCenteredText(const char* text, int16_t centerX, int16_t centerY,
@@ -382,8 +394,12 @@ void setup() {
   }
   canvas.setSwapBytes(true);
 
-  pixels.begin();
-  pixels.clear();
+  onboardPixel.begin();
+  onboardPixel.clear();
+  if (Config::kExternalPixelCount > 0) {
+    externalPixels.begin();
+    externalPixels.clear();
+  }
   applyPixelOutput();
   drawInitialUi();
 }
