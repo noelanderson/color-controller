@@ -9,6 +9,7 @@
 #include "Config.h"
 #include "ControllerModel.h"
 #include "PresetGesture.h"
+#include "ReactiveLighting.h"
 
 // Screen-space dimensions, hit regions, and RGB565 theme colors.
 namespace Ui {
@@ -37,6 +38,8 @@ constexpr uint16_t kWhite = 0xFFFF;
 constexpr uint16_t kBlack = 0x0000;
 constexpr uint16_t kGreen = 0x0600;
 constexpr uint16_t kRed = 0xB800;
+constexpr uint16_t kActive = 0x07E0;
+constexpr uint16_t kMusic = 0x4010;
 
 }  // namespace Ui
 
@@ -69,12 +72,14 @@ Adafruit_NeoPixel externalPixels(Config::kExternalPixelCount, Config::kExternalP
 ControllerModel model;
 TouchState touchState;
 PresetGesture presetGesture;
+MusicEnvelope musicEnvelope;
 bool wasTouched = false;
 uint8_t noTouchPolls = 0;
 int8_t savedPreset = -1;
 uint32_t savedFeedbackUntil = 0;
 int16_t markerX = -1;
 int16_t markerY = -1;
+uint32_t lastEffectFrame = 0;
 
 // Converts model RGB values to the display framebuffer's RGB565 format.
 uint16_t toRgb565(const RgbColor& color) {
@@ -99,24 +104,65 @@ void flushDisplay() {
                       static_cast<uint16_t*>(canvas.getPointer()));
 }
 
-void applyPixelOutput() {
-  // Set brightness before rewriting pixels because Adafruit_NeoPixel rescales
-  // its existing buffer when brightness changes.
-  onboardPixel.setBrightness(model.brightness());
-  const RgbColor output = model.powerOn() ? model.selected() : RgbColor{0, 0, 0};
-  for (uint16_t index = 0; index < onboardPixel.numPixels(); ++index) {
-    onboardPixel.setPixelColor(index, output.red, output.green, output.blue);
+void writeSolidPixels(Adafruit_NeoPixel& pixels, const RgbColor& color,
+                      uint8_t brightness) {
+  pixels.setBrightness(brightness);
+  for (uint16_t index = 0; index < pixels.numPixels(); ++index) {
+    pixels.setPixelColor(index, color.red, color.green, color.blue);
   }
-  onboardPixel.show();
+  pixels.show();
+}
 
-  if (Config::kExternalPixelCount == 0) {
+void writeRainbowPixels(Adafruit_NeoPixel& pixels, uint32_t now,
+                        uint8_t brightness) {
+  pixels.setBrightness(brightness);
+  for (uint16_t index = 0; index < pixels.numPixels(); ++index) {
+    const RgbColor color =
+        rainbowColor(now, Config::kRainbowCycleMs, index, pixels.numPixels());
+    pixels.setPixelColor(index, color.red, color.green, color.blue);
+  }
+  pixels.show();
+}
+
+void applyPixelOutput(uint32_t now = millis()) {
+  if (!model.powerOn()) {
+    writeSolidPixels(onboardPixel, {0, 0, 0}, 0);
+    if (Config::kExternalPixelCount > 0) {
+      writeSolidPixels(externalPixels, {0, 0, 0}, 0);
+    }
     return;
   }
-  externalPixels.setBrightness(model.brightness());
-  for (uint16_t index = 0; index < externalPixels.numPixels(); ++index) {
-    externalPixels.setPixelColor(index, output.red, output.green, output.blue);
+
+  if (model.mode() == OutputMode::kRainbow) {
+    const uint8_t brightness = scaleBrightness(
+        model.brightness(), breathingIntensity(now, Config::kRainbowBreathMs));
+    writeRainbowPixels(onboardPixel, now, brightness);
+    if (Config::kExternalPixelCount > 0) {
+      writeRainbowPixels(externalPixels, now, brightness);
+    }
+    return;
   }
-  externalPixels.show();
+
+  if (model.mode() == OutputMode::kMusic) {
+    uint16_t magnitude = 0;
+    if (AudioFeedback::readMicrophoneLevel(magnitude)) {
+      musicEnvelope.update(magnitude);
+    }
+    const uint8_t level = musicEnvelope.level();
+    const uint8_t brightness =
+        scaleBrightness(model.brightness(), musicIntensity(level));
+    const RgbColor color = musicColor(now, level);
+    writeSolidPixels(onboardPixel, color, brightness);
+    if (Config::kExternalPixelCount > 0) {
+      writeSolidPixels(externalPixels, color, brightness);
+    }
+    return;
+  }
+
+  writeSolidPixels(onboardPixel, model.selected(), model.brightness());
+  if (Config::kExternalPixelCount > 0) {
+    writeSolidPixels(externalPixels, model.selected(), model.brightness());
+  }
 }
 
 void drawCenteredText(const char* text, int16_t centerX, int16_t centerY,
@@ -185,11 +231,57 @@ void drawWheelMarker() {
   canvas.drawCircle(markerX, markerY, 7, outline);
 }
 
-void drawPreset(uint8_t index) {
+void drawControl(uint8_t index) {
   const uint8_t column = index % 2;
   const uint8_t row = index / 2;
   const int16_t x = Ui::kPresetX[column];
   const int16_t y = Ui::kPresetY[row];
+
+  if (index == ControllerModel::kRainbowControlIndex) {
+    canvas.fillRoundRect(x, y, Ui::kPresetWidth, Ui::kPresetHeight, 8, Ui::kBlack);
+    constexpr uint8_t kBands = 12;
+    for (uint8_t band = 0; band < kBands; ++band) {
+      const RgbColor color =
+          hsvToRgb({static_cast<uint16_t>(band * 360 / kBands), 255, 255});
+      const int16_t bandX = x + 4 + band * (Ui::kPresetWidth - 8) / kBands;
+      const int16_t nextX =
+          x + 4 + (band + 1) * (Ui::kPresetWidth - 8) / kBands;
+      canvas.fillRect(bandX, y + 4, nextX - bandX, Ui::kPresetHeight - 8,
+                      toRgb565(color));
+    }
+    const uint16_t outline =
+        model.mode() == OutputMode::kRainbow ? Ui::kActive : Ui::kWhite;
+    canvas.drawRoundRect(x, y, Ui::kPresetWidth, Ui::kPresetHeight, 8, outline);
+    if (model.mode() == OutputMode::kRainbow) {
+      canvas.drawRoundRect(x + 2, y + 2, Ui::kPresetWidth - 4,
+                           Ui::kPresetHeight - 4, 6, outline);
+    }
+    drawCenteredText("P5 RAINBOW", x + Ui::kPresetWidth / 2,
+                     y + Ui::kPresetHeight / 2, Ui::kWhite, Ui::kBlack, 1);
+    return;
+  }
+
+  if (index == ControllerModel::kMusicControlIndex) {
+    const uint16_t outline =
+        model.mode() == OutputMode::kMusic ? Ui::kActive : Ui::kWhite;
+    canvas.fillRoundRect(x, y, Ui::kPresetWidth, Ui::kPresetHeight, 8, Ui::kMusic);
+    canvas.drawRoundRect(x, y, Ui::kPresetWidth, Ui::kPresetHeight, 8, outline);
+    if (model.mode() == OutputMode::kMusic) {
+      canvas.drawRoundRect(x + 2, y + 2, Ui::kPresetWidth - 4,
+                           Ui::kPresetHeight - 4, 6, outline);
+    }
+    const int16_t noteX = x + Ui::kPresetWidth / 2 + 5;
+    const int16_t noteY = y + 16;
+    canvas.fillRect(noteX, noteY, 4, 23, Ui::kWhite);
+    canvas.fillRect(noteX, noteY, 17, 4, Ui::kWhite);
+    canvas.fillCircle(noteX - 5, noteY + 24, 7, Ui::kWhite);
+    canvas.fillCircle(noteX + 12, noteY + 17, 7, Ui::kWhite);
+    if (!AudioFeedback::microphoneAvailable()) {
+      canvas.fillCircle(x + Ui::kPresetWidth - 10, y + 10, 4, Ui::kRed);
+    }
+    return;
+  }
+
   const RgbColor color = model.preset(index);
   const uint16_t fill = toRgb565(color);
   const uint16_t text =
@@ -211,9 +303,9 @@ void drawPreset(uint8_t index) {
                    fill);
 }
 
-void drawPresets() {
-  for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
-    drawPreset(index);
+void drawControls() {
+  for (uint8_t index = 0; index < ControllerModel::kControlCount; ++index) {
+    drawControl(index);
   }
 }
 
@@ -253,7 +345,7 @@ void drawBrightnessControl() {
 void drawDynamicUi() {
   drawColorStrip();
   drawWheelMarker();
-  drawPresets();
+  drawControls();
   drawPowerControl();
   drawBrightnessControl();
   flushDisplay();
@@ -270,7 +362,7 @@ void selectWheelColor(int16_t x, int16_t y) {
   RgbColor color;
   if (!colorFromWheel(x, y, Ui::kWheelCenterX, Ui::kWheelCenterY, Ui::kWheelRadius,
                       color) ||
-      color == model.selected()) {
+      (color == model.selected() && model.mode() == OutputMode::kSolid)) {
     return;
   }
   model.select(color);
@@ -296,7 +388,7 @@ TouchTarget identifyTarget(int16_t x, int16_t y, uint8_t& presetIndex) {
                      ignored)) {
     return TouchTarget::kWheel;
   }
-  for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
+  for (uint8_t index = 0; index < ControllerModel::kControlCount; ++index) {
     if (presetContains(index, x, y)) {
       presetIndex = index;
       return TouchTarget::kPreset;
@@ -318,7 +410,8 @@ void handleTouchDown(int16_t x, int16_t y, uint32_t now) {
   touchState.lastX = x;
   touchState.lastY = y;
 
-  if (touchState.target == TouchTarget::kPreset) {
+  if (touchState.target == TouchTarget::kPreset &&
+      touchState.presetIndex < ControllerModel::kPresetCount) {
     presetGesture.begin(now);
   } else if (touchState.target == TouchTarget::kWheel) {
     selectWheelColor(x, y);
@@ -339,34 +432,50 @@ void handleTouchMove(int16_t x, int16_t y) {
 
 void updatePresetHold(uint32_t now) {
   if (touchState.target == TouchTarget::kPreset &&
+      touchState.presetIndex < ControllerModel::kPresetCount &&
       presetGesture.update(now,
                            presetContains(touchState.presetIndex, touchState.lastX,
                                           touchState.lastY),
                            Config::kPresetHoldMs) == PresetGestureEvent::kStore) {
     model.storePreset(touchState.presetIndex);
-    const int8_t previousSavedPreset = savedPreset;
+    model.setMode(OutputMode::kSolid);
     savedPreset = touchState.presetIndex;
     savedFeedbackUntil = now + Config::kSavedFeedbackMs;
-    if (previousSavedPreset >= 0 && previousSavedPreset != savedPreset) {
-      drawPreset(previousSavedPreset);
-    }
-    drawPreset(touchState.presetIndex);
-    flushDisplay();
+    applyPixelOutput(now);
+    drawDynamicUi();
     AudioFeedback::beepLong();
   }
 }
 
 void handleTouchUp() {
   if (touchState.target == TouchTarget::kPreset &&
+      touchState.presetIndex < ControllerModel::kPresetCount &&
       presetGesture.release(presetContains(touchState.presetIndex, touchState.lastX,
                                            touchState.lastY)) ==
           PresetGestureEvent::kRecall) {
     const RgbColor preset = model.preset(touchState.presetIndex);
-    if (preset != model.selected()) {
+    if (preset != model.selected() || model.mode() != OutputMode::kSolid) {
       model.select(preset);
       applyPixelOutput();
       drawDynamicUi();
     }
+    AudioFeedback::beep();
+  } else if (touchState.target == TouchTarget::kPreset &&
+             presetContains(touchState.presetIndex, touchState.lastX,
+                            touchState.lastY) &&
+             (touchState.presetIndex == ControllerModel::kRainbowControlIndex ||
+              touchState.presetIndex == ControllerModel::kMusicControlIndex)) {
+    const OutputMode mode =
+        touchState.presetIndex == ControllerModel::kRainbowControlIndex
+            ? OutputMode::kRainbow
+            : OutputMode::kMusic;
+    model.setMode(mode);
+    if (mode == OutputMode::kMusic) {
+      musicEnvelope.reset();
+    }
+    lastEffectFrame = millis();
+    applyPixelOutput(lastEffectFrame);
+    drawDynamicUi();
     AudioFeedback::beep();
   } else if (touchState.target == TouchTarget::kPower &&
              contains(touchState.lastX, touchState.lastY, Ui::kPowerX, Ui::kPowerY,
@@ -390,7 +499,9 @@ void setup() {
   touch.Set_Rotation(Config::kDisplayRotation);
 
   if (!AudioFeedback::begin(g_touchI2CBus)) {
-    Serial.println("WARNING: audio codec init failed; beeps disabled");
+    Serial.println("WARNING: audio I/O init failed; beeps or microphone may be unavailable");
+  } else if (!AudioFeedback::microphoneAvailable()) {
+    Serial.println("WARNING: microphone init failed; music mode uses fallback glow");
   }
 
   canvas.setColorDepth(16);
@@ -433,11 +544,17 @@ void loop() {
   }
   updatePresetHold(now);
 
+  if (model.powerOn() && model.mode() != OutputMode::kSolid &&
+      now - lastEffectFrame >= Config::kEffectFrameMs) {
+    lastEffectFrame = now;
+    applyPixelOutput(now);
+  }
+
   if (savedPreset >= 0 &&
       static_cast<int32_t>(now - savedFeedbackUntil) >= 0) {
     const uint8_t expiredPreset = savedPreset;
     savedPreset = -1;
-    drawPreset(expiredPreset);
+    drawControl(expiredPreset);
     flushDisplay();
   }
   delay(5);

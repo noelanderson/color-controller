@@ -3,6 +3,12 @@
 #include "ColorMath.h"
 #include "Config.h"
 
+enum class OutputMode : uint8_t {
+  kSolid,
+  kRainbow,
+  kMusic,
+};
+
 /**
  * Owns user-visible controller state independently of display and LED hardware.
  *
@@ -11,17 +17,18 @@
  */
 class ControllerModel {
  public:
-  static constexpr uint8_t kPresetCount = 6;
+  static constexpr uint8_t kPresetCount = 4;
+  static constexpr uint8_t kControlCount = 6;
+  static constexpr uint8_t kRainbowControlIndex = 4;
+  static constexpr uint8_t kMusicControlIndex = 5;
 
-  /** Creates the model with a red selection and six useful default presets. */
+  /** Creates the model with a red selection and four useful default presets. */
   ControllerModel()
       : selected_({255, 0, 0}), brightness_(Config::kInitialBrightness), powerOn_(true) {
     presets_[0] = {255, 0, 0};
     presets_[1] = {255, 128, 0};
     presets_[2] = {255, 255, 0};
     presets_[3] = {0, 255, 0};
-    presets_[4] = {0, 96, 255};
-    presets_[5] = {180, 0, 255};
   }
 
   const RgbColor& selected() const {
@@ -31,6 +38,7 @@ class ControllerModel {
   /** Replaces the current color without changing power or brightness. */
   void select(const RgbColor& color) {
     selected_ = color;
+    mode_ = OutputMode::kSolid;
   }
 
   uint8_t brightness() const {
@@ -47,6 +55,14 @@ class ControllerModel {
 
   void togglePower() {
     powerOn_ = !powerOn_;
+  }
+
+  OutputMode mode() const {
+    return mode_;
+  }
+
+  void setMode(OutputMode mode) {
+    mode_ = mode;
   }
 
   /** Returns a preset by index; callers must pass an index below kPresetCount. */
@@ -66,4 +82,5 @@ class ControllerModel {
   RgbColor presets_[kPresetCount];
   uint8_t brightness_;
   bool powerOn_;
+  OutputMode mode_ = OutputMode::kSolid;
 };

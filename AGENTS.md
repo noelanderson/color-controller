@@ -34,8 +34,12 @@ Run the smallest relevant checks after a change.
 Host-side tests, from a Visual Studio Developer PowerShell:
 
 ```powershell
-cl /std:c++17 /EHsc tests\color_math_tests.cpp
-.\color_math_tests.exe
+New-Item -ItemType Directory -Force build | Out-Null
+cl /std:c++17 /EHsc `
+  /Fo:build\color_math_tests.obj `
+  /Fe:build\color_math_tests.exe `
+  tests\color_math_tests.cpp
+.\build\color_math_tests.exe
 ```
 
 Firmware build:

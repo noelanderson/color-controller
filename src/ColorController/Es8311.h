@@ -24,6 +24,9 @@ void es8311_delete(es8311_handle_t dev);
 /** Resets the codec and configures clocks/format for the fixed operating point. */
 esp_err_t es8311_init(es8311_handle_t dev);
 
+/** Enables the board's analog microphone input and applies the vendor gain. */
+esp_err_t es8311_microphone_config(es8311_handle_t dev);
+
 esp_err_t es8311_voice_volume_set(es8311_handle_t dev, int volume, int* volume_set);
 
 esp_err_t es8311_voice_mute(es8311_handle_t dev, bool mute);

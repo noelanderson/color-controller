@@ -6,8 +6,10 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "../firmware/ColorController/ColorMath.h"
-#include "../firmware/ColorController/PresetGesture.h"
+#include "../src/ColorController/ColorMath.h"
+#include "../src/ColorController/ControllerModel.h"
+#include "../src/ColorController/PresetGesture.h"
+#include "../src/ColorController/ReactiveLighting.h"
 
 namespace {
 
@@ -76,6 +78,57 @@ void testPresetGesture() {
   assert(gesture.update(650, true, 700) == PresetGestureEvent::kStore);
 }
 
+void testControllerModes() {
+  ControllerModel model;
+  assert(model.mode() == OutputMode::kSolid);
+  assert(ControllerModel::kPresetCount == 4);
+
+  model.setMode(OutputMode::kRainbow);
+  assert(model.mode() == OutputMode::kRainbow);
+  model.select({12, 34, 56});
+  assert(model.mode() == OutputMode::kSolid);
+  assert((model.selected() == RgbColor{12, 34, 56}));
+
+  model.setMode(OutputMode::kMusic);
+  model.togglePower();
+  assert(model.mode() == OutputMode::kMusic);
+  assert(!model.powerOn());
+}
+
+void testReactiveLightingMath() {
+  assert(scaleBrightness(200, 0) == 0);
+  assert(scaleBrightness(200, 255) == 200);
+  assert(scaleBrightness(200, 128) == 100);
+
+  assert(breathingIntensity(0, 5000) == 64);
+  assert(breathingIntensity(2500, 5000) == 255);
+  assert(breathingIntensity(5000, 5000) == 64);
+
+  assert((rainbowColor(0, 12000, 0, 1) == RgbColor{255, 0, 0}));
+  assert((rainbowColor(4000, 12000, 0, 1) == RgbColor{0, 255, 0}));
+  assert((rainbowColor(0, 12000, 1, 3) == RgbColor{0, 255, 0}));
+  assert(musicIntensity(0) == 32);
+  assert(musicIntensity(255) == 255);
+}
+
+void testMusicEnvelope() {
+  MusicEnvelope envelope;
+  assert(envelope.update(100) == 0);
+  assert(envelope.update(100) == 0);
+  const uint8_t attack = envelope.update(1000);
+  assert(attack > 150);
+  const uint8_t release = envelope.update(100);
+  assert(release < attack);
+  assert(release > 0);
+  uint8_t sustained = 0;
+  for (uint16_t index = 0; index < 300; ++index) {
+    sustained = envelope.update(1000);
+  }
+  assert(sustained > 200);
+  envelope.reset();
+  assert(envelope.level() == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -84,6 +137,9 @@ int main() {
   testWheelGeometry();
   testBrightnessMapping();
   testPresetGesture();
+  testControllerModes();
+  testReactiveLightingMath();
+  testMusicEnvelope();
   std::cout << "Color math tests passed\n";
   return 0;
 }

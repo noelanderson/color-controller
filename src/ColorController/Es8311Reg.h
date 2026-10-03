@@ -21,7 +21,9 @@
 #define ES8311_SYSTEM_REG0E       0x0E
 #define ES8311_SYSTEM_REG12       0x12
 #define ES8311_SYSTEM_REG13       0x13
+#define ES8311_SYSTEM_REG14       0x14
 
+#define ES8311_ADC_REG17          0x17
 #define ES8311_ADC_REG1C          0x1C
 
 #define ES8311_DAC_REG31          0x31

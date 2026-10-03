@@ -14,12 +14,20 @@ The display runs in 480x320 landscape orientation.
 
 - **Top strip:** previews the selected color.
 - **Color wheel:** touch or drag in the left half to choose hue and saturation.
-- **Presets:** tap P1-P6 to recall a color. Hold a preset for at least 700 ms to
+- **Presets:** tap P1-P4 to recall a color. Hold a preset for at least 700 ms to
   replace it with the currently selected color. `SAVED` confirms the long press.
+- **P5 Rainbow:** cycles through the full color spectrum with a slow breathing
+  brightness effect. External arrays show a moving rainbow across the strip.
+- **P6 Music:** uses the onboard microphone to pulse a changing color and its
+  brightness with the detected audio level. The musical-note button is outlined
+  in green while active.
 - **ON/OFF:** disables LED output without forgetting the selected color or brightness.
 - **Brightness:** drag the bottom slider from 0 through 255.
 
-Presets are currently held in RAM and return to their defaults after reset.
+P1-P4 are currently held in RAM and return to their defaults after reset.
+Touching the color wheel or a static preset exits either animated mode. The
+brightness slider is the maximum effect brightness, and power off/on preserves
+the active mode.
 
 ## Hardware mapping
 
@@ -30,6 +38,8 @@ Presets are currently held in RAM and return to their defaults after reset.
 | LCD backlight                             |      GPIO 41 |
 | Touch SDA/SCL                             |   GPIO 38/39 |
 | Touch reset/interrupt                     |   GPIO 48/47 |
+| ES8311 microphone I2S data                |      GPIO 16 |
+| ES8311 speaker I2S data                   |      GPIO 15 |
 | P2 output used for external NeoPixel data |      GPIO 45 |
 | P2 alternate GPIO signal                  |      GPIO 46 |
 
@@ -139,12 +149,17 @@ fatal Serial message if the framebuffer cannot be allocated.
 From a Visual Studio Developer PowerShell:
 
 ```powershell
-cl /std:c++17 /EHsc tests\color_math_tests.cpp
-.\color_math_tests.exe
+New-Item -ItemType Directory -Force build | Out-Null
+cl /std:c++17 /EHsc `
+  /Fo:build\color_math_tests.obj `
+  /Fe:build\color_math_tests.exe `
+  tests\color_math_tests.cpp
+.\build\color_math_tests.exe
 ```
 
 The tests cover primary and round-trip color conversion, wheel bounds,
-brightness mapping, preset tap/hold/cancel behavior, and timer rollover.
+brightness mapping, preset tap/hold/cancel behavior, mode transitions, rainbow
+and breathing math, microphone-envelope smoothing, and timer rollover.
 
 ## Driving an external NeoPixel array on P2
 
@@ -196,15 +211,26 @@ After flashing:
 1. Confirm the UI is landscape and touch coordinates align with every control.
 2. Drag through red, green, and blue portions of the wheel and verify the top
    strip and onboard LED channel order.
-3. Tap each preset and verify the selected color changes once.
-4. Hold a preset until `SAVED`, select another color, then tap the saved preset.
+3. Tap P1-P4 and verify the selected color changes once.
+4. Hold P1-P4 until `SAVED`, select another color, then tap the saved preset.
 5. Sweep brightness to both endpoints.
 6. Turn output off, change color and brightness, then turn it on and verify the
    latest settings are restored.
-7. Drag out of a pressed preset before release and verify it is not recalled or
+7. Tap P5 and verify a full hue cycle with a smooth, slow breathing effect.
+   With an external array, verify the rainbow is distributed across the strip.
+8. Tap the musical-note P6 button, play music near the onboard microphone, and
+   verify brightness responds quickly to transients and decays smoothly.
+9. While each effect is active, adjust brightness, toggle power, and touch the
+   wheel to verify the documented mode transitions.
+10. Drag out of a pressed preset before release and verify it is not recalled or
    overwritten.
-8. With the external NeoPixel array connected, power-cycle and reset the board
+11. With the external NeoPixel array connected, power-cycle and reset the board
    several times and confirm reliable booting.
+
+Microphone sensitivity and the perceived breathing speed require final tuning
+on the physical board. If microphone initialization fails, Serial reports a
+warning, P6 shows a red status dot, and music mode continues as a dim fallback
+color cycle without affecting the other controls.
 
 ## Design notes
 
@@ -212,16 +238,19 @@ The UI uses a 16-bit TFT_eSPI sprite backed by the PSRAM-enabled ESP32 allocator
 and sends that buffer through Elecrow's ST77922 QSPI driver.
 
 Touch processing uses a non-blocking state machine, including long-press
-detection.
+detection. The same loop schedules effect frames every 25 ms, so no coroutine
+library is needed.
 
 ### Classes and components
 
 | Component               | Responsibility                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ControllerModel`       | Owns the selected color, brightness, power state, and six RAM-only presets without depending on display or LED hardware. |
+| `ControllerModel`       | Owns the selected color, brightness, power state, active output mode, and four RAM-only presets.                          |
 | `PresetGesture`         | Distinguishes a preset tap from a 700 ms hold and guarantees that a stored preset is not also recalled on release.       |
 | `RgbColor` / `HsvColor` | Small color value types shared by the model, renderer, tests, and NeoPixel adapter.                                      |
 | `ColorMath` functions   | Convert RGB/HSV values, map wheel coordinates to color, and map slider coordinates to brightness.                        |
+| `ReactiveLighting`      | Provides host-tested rainbow, breathing, music-color, brightness-scaling, and adaptive audio-envelope math.              |
+| `AudioFeedback`         | Runs duplex ES8311 audio for touch beeps and non-blocking onboard microphone amplitude samples.                          |
 | `TouchState`            | Records which control captured the active touch plus its latest coordinates until release debounce completes.            |
 | `ColorController.ino`   | Composes the hardware drivers, model, renderer, touch routing, and Arduino `setup()`/`loop()` lifecycle.                 |
 

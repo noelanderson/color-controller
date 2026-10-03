@@ -148,6 +148,13 @@ esp_err_t es8311_init(es8311_handle_t dev) {
   return writeReg(dev, ES8311_DAC_REG37, 0x08);  // bypass DAC equalizer
 }
 
+esp_err_t es8311_microphone_config(es8311_handle_t dev) {
+  if (writeReg(dev, ES8311_ADC_REG17, 0xC8) != ESP_OK) {
+    return ESP_FAIL;
+  }
+  return writeReg(dev, ES8311_SYSTEM_REG14, 0x1A);
+}
+
 esp_err_t es8311_voice_volume_set(es8311_handle_t dev, int volume, int* volume_set) {
   if (volume < 0) {
     volume = 0;

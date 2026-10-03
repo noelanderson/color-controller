@@ -15,10 +15,13 @@ constexpr float kTwoPi = 6.28318530718f;
 
 es8311_handle_t codec = nullptr;
 i2s_chan_handle_t txChannel = nullptr;
+i2s_chan_handle_t rxChannel = nullptr;
+bool microphoneReady = false;
 
 bool beginI2s() {
   i2s_chan_config_t chanConfig = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-  if (i2s_new_channel(&chanConfig, &txChannel, nullptr) != ESP_OK) {
+  chanConfig.dma_frame_num = 64;
+  if (i2s_new_channel(&chanConfig, &txChannel, &rxChannel) != ESP_OK) {
     return false;
   }
 
@@ -32,13 +35,19 @@ bool beginI2s() {
               .bclk = static_cast<gpio_num_t>(Config::kAudioI2sBckPin),
               .ws = static_cast<gpio_num_t>(Config::kAudioI2sWsPin),
               .dout = static_cast<gpio_num_t>(Config::kAudioI2sDoutPin),
-              .din = I2S_GPIO_UNUSED,
+              .din = static_cast<gpio_num_t>(Config::kAudioI2sDinPin),
               .invert_flags = {.mclk_inv = false, .bclk_inv = false, .ws_inv = false},
           },
   };
   stdConfig.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_384;
 
-  return i2s_channel_init_std_mode(txChannel, &stdConfig) == ESP_OK;
+  // The first initialized channel owns BCLK/WS in an IDF full-duplex pair.
+  // RX remains enabled continuously, so it must be the clock master.
+  if (i2s_channel_init_std_mode(rxChannel, &stdConfig) != ESP_OK ||
+      i2s_channel_init_std_mode(txChannel, &stdConfig) != ESP_OK) {
+    return false;
+  }
+  return i2s_channel_enable(rxChannel) == ESP_OK;
 }
 
 /** Writes a short sine tone, fading the ends in/out to avoid speaker pops.
@@ -93,8 +102,47 @@ bool begin(i2c_master_bus_handle_t touchBus) {
   }
   es8311_voice_volume_set(codec, 70, nullptr);
   es8311_voice_mute(codec, false);
+  microphoneReady = es8311_microphone_config(codec) == ESP_OK;
 
-  return beginI2s();
+  const bool i2sReady = beginI2s();
+  microphoneReady = microphoneReady && i2sReady;
+  return i2sReady;
+}
+
+bool microphoneAvailable() {
+  return microphoneReady;
+}
+
+bool readMicrophoneLevel(uint16_t& magnitude) {
+  if (!microphoneReady || rxChannel == nullptr) {
+    return false;
+  }
+
+  int16_t samples[128];
+  uint64_t total = 0;
+  size_t totalSamples = 0;
+  while (true) {
+    size_t bytesRead = 0;
+    const esp_err_t result =
+        i2s_channel_read(rxChannel, samples, sizeof(samples), &bytesRead, 0);
+    if (result == ESP_ERR_TIMEOUT || bytesRead == 0) {
+      break;
+    }
+    if (result != ESP_OK) {
+      return false;
+    }
+    const size_t sampleCount = bytesRead / sizeof(samples[0]);
+    for (size_t index = 0; index < sampleCount; ++index) {
+      const int32_t sample = samples[index];
+      total += sample < 0 ? -sample : sample;
+    }
+    totalSamples += sampleCount;
+  }
+  if (totalSamples == 0) {
+    return false;
+  }
+  magnitude = static_cast<uint16_t>(total / totalSamples);
+  return true;
 }
 
 void beep() {
