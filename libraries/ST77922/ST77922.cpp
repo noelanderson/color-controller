@@ -77,6 +77,15 @@ ST77922::ST77922(void)
 	width = LCD_WIDTH;
 	height = LCD_HEIGHT;
 	rotation = 0;
+	initialized = false;
+}
+
+bool ST77922::begin(void)
+{
+	if(initialized)
+	{
+		return true;
+	}
 	pinMode(LCD_CS, OUTPUT);
 	digitalWrite(LCD_CS, HIGH);
  	pinMode(LCD_BL, OUTPUT);
@@ -91,7 +100,10 @@ ST77922::ST77922(void)
         .max_transfer_sz = (TX_LEN*16)+8,
         .flags = SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_IOMUX_PINS |SPICOMMON_BUSFLAG_QUAD,
     };
-    ESP_ERROR_CHECK(spi_bus_initialize(QSPI_PORT, &buscfg, SPI_DMA_CH_AUTO));
+    if(spi_bus_initialize(QSPI_PORT, &buscfg, SPI_DMA_CH_AUTO) != ESP_OK)
+    {
+        return false;
+    }
     spi_device_interface_config_t devcfg = {
         .command_bits = 0,
         .address_bits = 0,
@@ -101,9 +113,27 @@ ST77922::ST77922(void)
         .flags = SPI_DEVICE_HALFDUPLEX ,
         .queue_size = 17,
     };
-    ESP_ERROR_CHECK(spi_bus_add_device(QSPI_PORT, &devcfg, &qspi));
+    if(spi_bus_add_device(QSPI_PORT, &devcfg, &qspi) != ESP_OK)
+    {
+        spi_bus_free(QSPI_PORT);
+        return false;
+    }
 	Init();
 	Set_Rotation(0);
+	initialized = true;
+	return true;
+}
+
+void ST77922::Set_Backlight(bool enabled)
+{
+	if(enabled)
+	{
+		LCD_BL_HIGH;
+	}
+	else
+	{
+		LCD_BL_LOW;
+	}
 }
 
 void ST77922::Write_Reg(uint32_t cmd, void *data, uint8_t len)
@@ -138,7 +168,6 @@ void ST77922::Init(void)
         Write_Reg(st77922_lcd_init[i].cmd, st77922_lcd_init[i].data, st77922_lcd_init[i].len);
         delay(st77922_lcd_init[i].delay_ms);
     }
-	LCD_BL_HIGH;
 }
 
 void ST77922::Set_Rotation(uint8_t r)
@@ -273,5 +302,3 @@ uint16_t ST77922::Get_Height(void)
 {
 	return height;
 }
-
-

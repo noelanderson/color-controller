@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <math.h>
 
+#include "AwaitConfig.h"
 #include "Config.h"
 #include "Es8311.h"
 #include "driver/i2s_std.h"
@@ -17,6 +18,8 @@ es8311_handle_t codec = nullptr;
 i2s_chan_handle_t txChannel = nullptr;
 i2s_chan_handle_t rxChannel = nullptr;
 bool microphoneReady = false;
+bool feedbackReady = false;
+uint8_t requestedToneCount = 0;
 
 bool beginI2s() {
   i2s_chan_config_t chanConfig = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
@@ -89,24 +92,54 @@ void playTone(uint32_t durationMs) {
   i2s_channel_disable(txChannel);
 }
 
-}  // namespace
-
-bool begin(i2c_master_bus_handle_t touchBus) {
+simpleawait::Task<void> service(i2c_master_bus_handle_t touchBus) {
   pinMode(Config::kAudioEnablePin, OUTPUT);
-  // Board-specific polarity: LOW enables the onboard speaker amplifier.
   digitalWrite(Config::kAudioEnablePin, LOW);
 
   codec = es8311_create(touchBus, Config::kAudioCodecI2cAddress);
-  if (codec == nullptr || es8311_init(codec) != ESP_OK) {
-    return false;
+  if (codec == nullptr || es8311_init_begin(codec) != ESP_OK) {
+    Serial.println("WARNING: audio codec reset failed; audio I/O unavailable");
+    co_return;
   }
+  co_await simpleawait::delay_ms(20);
+  if (es8311_init_finish(codec) != ESP_OK) {
+    Serial.println("WARNING: audio codec init failed; audio I/O unavailable");
+    co_return;
+  }
+
   es8311_voice_volume_set(codec, 70, nullptr);
   es8311_voice_mute(codec, false);
   microphoneReady = es8311_microphone_config(codec) == ESP_OK;
+  feedbackReady = beginI2s();
+  microphoneReady = microphoneReady && feedbackReady;
+  if (!feedbackReady) {
+    Serial.println("WARNING: audio I/O init failed; beeps and microphone unavailable");
+    co_return;
+  }
+  if (!microphoneReady) {
+    Serial.println("WARNING: microphone init failed; music mode uses fallback glow");
+  }
 
-  const bool i2sReady = beginI2s();
-  microphoneReady = microphoneReady && i2sReady;
-  return i2sReady;
+  while (true) {
+    if (requestedToneCount == 0) {
+      co_await simpleawait::delay_ms(5);
+      continue;
+    }
+
+    const uint8_t toneCount = requestedToneCount;
+    requestedToneCount = 0;
+    playTone(Config::kAudioBeepDurationMs);
+    if (toneCount > 1) {
+      co_await simpleawait::delay_ms(Config::kAudioBeepGapMs);
+      playTone(Config::kAudioBeepDurationMs);
+    }
+  }
+}
+
+}  // namespace
+
+bool start(i2c_master_bus_handle_t touchBus) {
+  return simpleawait::create_task(service(touchBus)).valid();
 }
 
 bool microphoneAvailable() {
@@ -146,13 +179,15 @@ bool readMicrophoneLevel(uint16_t& magnitude) {
 }
 
 void beep() {
-  playTone(Config::kAudioBeepDurationMs);
+  if (feedbackReady) {
+    requestedToneCount = requestedToneCount < 1 ? 1 : requestedToneCount;
+  }
 }
 
 void beepLong() {
-  playTone(Config::kAudioBeepDurationMs);
-  delay(Config::kAudioBeepGapMs);
-  playTone(Config::kAudioBeepDurationMs);
+  if (feedbackReady) {
+    requestedToneCount = 2;
+  }
 }
 
 }  // namespace AudioFeedback

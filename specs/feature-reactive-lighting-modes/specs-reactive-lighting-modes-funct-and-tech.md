@@ -65,7 +65,6 @@ all output without discarding the active mode.
 - FFT-based frequency bands, beat classification, or tempo estimation.
 - User-configurable animation speed, microphone gain, or sensitivity controls.
 - Persistent mode selection across resets.
-- Replacing the existing touch loop with a coroutine scheduler.
 - Audio playback while music mode is active.
 
 ### Open Questions (Functional)
@@ -92,8 +91,8 @@ writes. Existing touch and display drivers remain unchanged.
 
 ### Dependencies
 
-- **Internal:** `ColorMath`, `ControllerModel`, `AudioFeedback`, and the existing
-  timer-driven Arduino loop.
+- **Internal:** `ColorMath`, `ControllerModel`, `AudioFeedback`, and the
+  SimpleAwait task scheduler.
 - **External:** Existing ESP32 Arduino I2S driver and included NeoPixel/display
   libraries. No new library is required.
 - **Reference:** Freenove `Sketch_07.2_Echo` confirms GPIO 16 as I2S input and
@@ -115,9 +114,9 @@ writes. Existing touch and display drivers remain unchanged.
 
 ### Implementation Considerations
 
-- **Approach:** Use the existing loop as a cooperative scheduler. A 25 ms
-  effect tick updates LEDs, while touch and saved-preset timers continue on
-  every loop. Rainbow hue and breathing are derived from absolute time, so
+- **Approach:** Use fixed-memory SimpleAwait tasks as the cooperative scheduler.
+  A 25 ms task updates LEDs, while separate tasks handle touch, effect UI, audio,
+  and persistence. Rainbow hue and breathing are derived from absolute time, so
   missed frames do not accumulate drift.
 - **Music response:** Convert short microphone blocks to mean absolute sample
   amplitude, remove an adaptive noise floor, normalize against a tracked peak,
@@ -127,9 +126,9 @@ writes. Existing touch and display drivers remain unchanged.
   primitives for a note icon so no Unicode font dependency is introduced.
 - **Risks:** Microphone levels vary between boards and enclosures; codec
   full-duplex behavior and visual sensitivity require on-device tuning.
-- **Alternatives considered:** SimpleAwait would add a dependency without
-  simplifying these independent periodic state machines. FFT processing is
-  heavier than needed for amplitude-reactive pulsing.
+- **Alternatives considered:** Hand-written loop timers were initially used but
+  later consolidated into SimpleAwait tasks to keep one scheduling model. FFT
+  processing is heavier than needed for amplitude-reactive pulsing.
 
 ### Open Questions (Technical)
 
@@ -152,8 +151,7 @@ writes. Existing touch and display drivers remain unchanged.
 ### Implementation Guidance
 
 - Reuse the Freenove board samples for compatible pin and codec configuration.
-- Prefer the existing simple event loop; use SimpleAwait only if a genuinely
-  blocking sequence cannot be represented clearly as timer-driven state.
+- Run effect animation and other periodic runtime work in SimpleAwait tasks.
 - Keep hardware-independent response math covered by host-side tests.
 
 ---
@@ -223,8 +221,9 @@ writes. Existing touch and display drivers remain unchanged.
 
 ### Patterns Discovered
 
-- The existing main loop already provides cooperative scheduling for touch,
-  timers, and a bounded animation tick; coroutines would not reduce complexity.
+- SimpleAwait now provides one fixed-memory scheduling model for touch,
+  animations, UI refresh, audio sequencing, and delayed persistence; Arduino
+  `loop()` only polls it.
 - Freenove's matching 3.5-inch ST77922 configuration uses GPIO 16 for ES8311
   serial audio input and GPIO 15 for output.
 - The existing codec initialization powers the ADC but omits the microphone

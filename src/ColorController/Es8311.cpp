@@ -1,8 +1,6 @@
 #include "Es8311.h"
 
 #include "Es8311Reg.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 namespace {
 
@@ -111,11 +109,11 @@ void es8311_delete(es8311_handle_t dev) {
   delete static_cast<Es8311Dev*>(dev);
 }
 
-esp_err_t es8311_init(es8311_handle_t dev) {
-  if (writeReg(dev, ES8311_RESET_REG00, 0x1F) != ESP_OK) {
-    return ESP_FAIL;
-  }
-  vTaskDelay(pdMS_TO_TICKS(20));
+esp_err_t es8311_init_begin(es8311_handle_t dev) {
+  return writeReg(dev, ES8311_RESET_REG00, 0x1F);
+}
+
+esp_err_t es8311_init_finish(es8311_handle_t dev) {
   if (writeReg(dev, ES8311_RESET_REG00, 0x00) != ESP_OK) {
     return ESP_FAIL;
   }

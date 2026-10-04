@@ -32,9 +32,13 @@ constexpr uint32_t kAudioSampleRate = 16000;
 constexpr uint16_t kAudioBeepFrequencyHz = 1800;
 constexpr uint32_t kAudioBeepDurationMs = 70;
 constexpr uint32_t kAudioBeepGapMs = 50;
+constexpr uint32_t kTouchPollMs = 5;
 constexpr uint32_t kEffectFrameMs = 25;
 constexpr uint32_t kEffectUiFrameMs = 200;
 constexpr uint32_t kRainbowCycleMs = 12000;
 constexpr uint32_t kRainbowBreathMs = 5000;
+constexpr uint32_t kManualColorSaveDelayMs = 120000;
+constexpr uint32_t kPersistencePollMs = 250;
+constexpr uint32_t kPersistenceRetryMs = 5000;
 
 }  // namespace Config

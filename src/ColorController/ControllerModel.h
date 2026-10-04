@@ -12,8 +12,8 @@ enum class OutputMode : uint8_t {
 /**
  * Owns user-visible controller state independently of display and LED hardware.
  *
- * The selected color and brightness are preserved while power is off. Presets
- * are intentionally RAM-only in v1 and return to defaults after a reset.
+ * The selected color and brightness are preserved while power is off. Storage
+ * adapters may restore selected colors and presets during startup.
  */
 class ControllerModel {
  public:
@@ -70,11 +70,15 @@ class ControllerModel {
     return presets_[index];
   }
 
+  void setPreset(uint8_t index, const RgbColor& color) {
+    if (index < kPresetCount) {
+      presets_[index] = color;
+    }
+  }
+
   /** Copies the current selection into a valid preset slot. */
   void storePreset(uint8_t index) {
-    if (index < kPresetCount) {
-      presets_[index] = selected_;
-    }
+    setPreset(index, selected_);
   }
 
  private:

@@ -1,7 +1,7 @@
 #include "ST77922_Touch.h"
 
-i2c_master_dev_handle_t touch_handle;
-i2c_master_bus_handle_t g_touchI2CBus;
+i2c_master_dev_handle_t touch_handle = nullptr;
+i2c_master_bus_handle_t g_touchI2CBus = nullptr;
 
 ST77922_TOUCH::ST77922_TOUCH(void)
 {
@@ -9,7 +9,13 @@ ST77922_TOUCH::ST77922_TOUCH(void)
 	height = TOUCH_HEIGHT;
 	rotation = 0;
 	max_points = 0;
-	i2c_master_bus_config_t touch_i2c_cfg = {
+}
+
+bool ST77922_TOUCH::init(void)
+{
+	if(g_touchI2CBus == nullptr)
+	{
+		i2c_master_bus_config_t touch_i2c_cfg = {
         .i2c_port = I2C_NUM,
 		.sda_io_num = TOUCH_SDA,
         .scl_io_num = TOUCH_SCL, 
@@ -19,29 +25,57 @@ ST77922_TOUCH::ST77922_TOUCH(void)
         {
         	.enable_internal_pullup = true,
         }
-    };
-    i2c_new_master_bus(&touch_i2c_cfg, &g_touchI2CBus);
-    i2c_device_config_t dev_config = {
+		};
+		if(i2c_new_master_bus(&touch_i2c_cfg, &g_touchI2CBus) != ESP_OK)
+		{
+			max_points = 1;
+			return false;
+		}
+	}
+	if(touch_handle == nullptr)
+	{
+		i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = TOUCH_ADDR,
         .scl_speed_hz = I2C_SPEED,
-    };
-    i2c_master_bus_add_device(g_touchI2CBus, &dev_config, &touch_handle);
-}
-
-void ST77922_TOUCH::init(void)
-{
-	uint8_t data;
+		};
+		if(i2c_master_bus_add_device(g_touchI2CBus, &dev_config, &touch_handle) != ESP_OK)
+		{
+			max_points = 1;
+			return false;
+		}
+	}
+	uint8_t data = 0;
+	bool ready = false;
 	pinMode(TOUCH_RST, OUTPUT);
 	digitalWrite(TOUCH_RST, HIGH);
  	pinMode(TOUCH_INT, INPUT);
 	reset();
-	do
+	for(uint8_t attempt = 0; attempt < 16; attempt++)
 	{
-		Read_Data(touch_handle, STATUS, &data, 1);
-	}while(data&0x0F);
-	Read_Data(touch_handle, MAX_TOUCHES, &data, 1);
+		if(Read_Data(touch_handle, STATUS, &data, 1) != ESP_OK)
+		{
+			break;
+		}
+		if((data & 0x0F) == 0)
+		{
+			ready = true;
+			break;
+		}
+	}
+	if(!ready)
+	{
+		max_points = 1;
+		return false;
+	}
+	if(Read_Data(touch_handle, MAX_TOUCHES, &data, 1) != ESP_OK ||
+	   data == 0 || data > MAX_TOUCH_POINTS)
+	{
+		max_points = 1;
+		return false;
+	}
 	max_points = data;
+	return ready;
 }
 
 void ST77922_TOUCH::reset(void)
@@ -72,22 +106,32 @@ void ST77922_TOUCH::Set_Rotation(uint8_t r)
 	}
 }
 
-void ST77922_TOUCH::Read_Data(i2c_master_dev_handle_t dev, uint16_t reg, uint8_t* rbuf, size_t rlen)
+esp_err_t ST77922_TOUCH::Read_Data(i2c_master_dev_handle_t dev, uint16_t reg, uint8_t* rbuf, size_t rlen)
 {
 	const uint8_t wbuf[2] = {(uint8_t)((reg>>8)&0xFF), (uint8_t)(reg&0xFF)};
-	i2c_master_transmit_receive(dev, wbuf, 2, rbuf, rlen, 1000);
+	return i2c_master_transmit_receive(dev, wbuf, 2, rbuf, rlen, 1000);
 }
 
 bool ST77922_TOUCH::Get_Touch(void)
 {
+	if(touch_handle == nullptr || max_points == 0 || max_points > MAX_TOUCH_POINTS)
+	{
+		return false;
+	}
 	bool result;
 	uint8_t i = 0;
 	uint8_t data[7*MAX_TOUCH_POINTS] = {0};
 	uint8_t update = 0;
-	Read_Data(touch_handle, TOUCH_INFO, &update, 1);
+	if(Read_Data(touch_handle, TOUCH_INFO, &update, 1) != ESP_OK)
+	{
+		return false;
+	}
 	if(update&0x08)
 	{
-		Read_Data(touch_handle, TOUCH_POINT0, data, 7*max_points);
+		if(Read_Data(touch_handle, TOUCH_POINT0, data, 7*max_points) != ESP_OK)
+		{
+			return false;
+		}
 		for(i=0; i<max_points; i++)
 		{
 			if(data[i*7]&0x80)

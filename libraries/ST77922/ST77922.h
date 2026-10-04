@@ -53,6 +53,8 @@ class ST77922
 {
 public:
 	ST77922(void);
+	bool begin(void);
+	void Set_Backlight(bool enabled);
 	void Write_Reg(uint32_t cmd, void *data, uint8_t len);
 	void Init(void);
 	void Set_Rotation(uint8_t r);
@@ -63,6 +65,7 @@ public:
 	uint16_t Get_Height(void);
 private:
 	uint16_t width, height, rotation;
+	bool initialized;
 };
 
 typedef struct {

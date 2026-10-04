@@ -9,11 +9,11 @@ struct RgbColor {
   uint8_t green;
   uint8_t blue;
 
-  bool operator==(const RgbColor& other) const {
+  constexpr bool operator==(const RgbColor& other) const {
     return red == other.red && green == other.green && blue == other.blue;
   }
 
-  bool operator!=(const RgbColor& other) const {
+  constexpr bool operator!=(const RgbColor& other) const {
     return !(*this == other);
   }
 };

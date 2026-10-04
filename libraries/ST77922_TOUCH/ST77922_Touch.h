@@ -57,10 +57,10 @@ class ST77922_TOUCH
 {
 public:
 	ST77922_TOUCH(void);
-	void init(void);
+	bool init(void);
 	void reset(void);
 	void Set_Rotation(uint8_t r);
-	void Read_Data(i2c_master_dev_handle_t dev, uint16_t reg, uint8_t* rbuf, size_t rlen);
+	esp_err_t Read_Data(i2c_master_dev_handle_t dev, uint16_t reg, uint8_t* rbuf, size_t rlen);
 	bool Get_Touch(void);
 	uint8_t max_points;
 	struct _touch_dev

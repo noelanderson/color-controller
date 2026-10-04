@@ -25,7 +25,28 @@ the existing hardware behavior unless the task explicitly requires a change.
    behavior as hardware constraints. Do not change them without documenting the
    reason and impact.
 6. Update tests and user-facing documentation when behavior or setup changes.
-7. Do not commit generated files from `build/` or local executables.
+7. Keep Arduino `loop()` limited to `simpleawait::poll()`. Put touch handling,
+   effects, UI refreshes, persistence, audio sequencing, and other runtime work
+   in fixed-memory SimpleAwait tasks. Steady-state task loops must suspend with
+   a positive-duration wait; do not use `simpleawait::yield()`,
+   `delay_ms(0)`, or another permanently-ready loop that defeats scheduler idle.
+8. Do not add `delay()`, `vTaskDelay()`, sleeps, or hand-written busy waits to
+   application runtime code. Express waits with
+   `co_await simpleawait::delay_ms()` or another SimpleAwait primitive. The
+   ST77922 touch driver's two startup-only reset delays are hardware-mandated
+   vendor timing and must remain. The vendored SimpleAwait ESP32 idle hook is
+   the single sanctioned runtime `vTaskDelay()`; it is required for touch
+   responsiveness and must remain when updating the library.
+9. Keep hardware initialization in `setup()`; spawn runtime tasks only after
+   the state and hardware they use are ready. Check and report every task
+   creation failure.
+10. Never place an unbounded hardware-status polling loop in startup. Bound
+    retries, surface failure, and render a usable diagnostic UI before optional
+    peripherals can block initialization.
+11. Global constructors must initialize data only. Do not access GPIO, SPI,
+    I2C, display, touch, audio, storage, or other Arduino/ESP-IDF services until
+    `setup()` runs.
+12. Do not commit generated files from `build/` or local executables.
 
 ## Validation
 
@@ -35,7 +56,7 @@ Host-side tests, from a Visual Studio Developer PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force build | Out-Null
-cl /std:c++17 /EHsc `
+cl /std:c++20 /EHsc `
   /Fo:build\color_math_tests.obj `
   /Fe:build\color_math_tests.exe `
   tests\color_math_tests.cpp

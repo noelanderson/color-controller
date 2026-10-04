@@ -24,10 +24,13 @@ The display runs in 480x320 landscape orientation.
 - **ON/OFF:** disables LED output without forgetting the selected color or brightness.
 - **Brightness:** drag the bottom slider from 0 through 255.
 
-P1-P4 are currently held in RAM and return to their defaults after reset.
+P1-P4 persist across reboot and power loss as soon as `SAVED` appears. A color
+chosen from the wheel or recalled from a preset is persisted after it remains
+unchanged in solid mode for two minutes. Rainbow and music colors are never
+saved, and entering either effect cancels a pending selected-color save.
 Touching the color wheel or a static preset exits either animated mode. The
 brightness slider is the maximum effect brightness, and power off/on preserves
-the active mode.
+the active mode until a reboot; startup always restores in solid mode.
 
 ## Hardware mapping
 
@@ -70,8 +73,9 @@ and should not back-drive the pin while the ESP32-S3 is unpowered.
   - `ST77922`
   - `ST77922_TOUCH`
   - `TFT_eSPI`
+  - `SimpleAwait` 1.0.1
 
-For Arduino IDE, copy those four folders into the Arduino libraries folder,
+For Arduino IDE, copy those five folders into the Arduino libraries folder,
 then restart the IDE. Open:
 
 `src/ColorController/ColorController.ino`
@@ -141,9 +145,23 @@ To build and flash in one step over COM8:
 .\tools\build-firmware.ps1 -Port COM8
 ```
 
+To flash the existing build again without recompiling, including to a second
+board on another port:
+
+```powershell
+.\tools\build-firmware.ps1 -UploadOnly -Port COM8
+.\tools\build-firmware.ps1 -UploadOnly -Port COM9
+```
+
+`-UploadOnly` fails if the required files are missing, so run one normal build
+first. Add `-ExternalPixelCount 60` when uploading an existing external-array
+build from its matching output folder.
+
 For policy-restricted Windows systems, the script compiles first and then uses
-`python -m esptool` to flash the verified merged image at address `0x0`,
-bypassing Arduino's packaged `flasher.exe` and `esptool.exe`.
+`python -m esptool` to flash the bootloader, partition table, boot app, and
+application at their standard offsets, bypassing Arduino's packaged
+`flasher.exe` and `esptool.exe`. It does not overwrite the NVS partition that
+stores presets and the stable selected color.
 
 In an environment without the Python block, the equivalent standard command is:
 
@@ -163,14 +181,14 @@ The compile command writes persistent build artifacts to the chosen
 
 | File                                 | Purpose                                                                                                                                    |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ColorController.ino.merged.bin`     | Complete 16 MB image containing the bootloader, partition table, and application; use this for flashing a complete image at address `0x0`. |
+| `ColorController.ino.merged.bin`     | Complete 16 MB image containing the bootloader, partition table, and application; flashing it at address `0x0` erases NVS and resets stored colors. |
 | `ColorController.ino.bin`            | Application image only; Arduino uploads it at address `0x10000`.                                                                           |
 | `ColorController.ino.bootloader.bin` | Bootloader image.                                                                                                                          |
 | `ColorController.ino.partitions.bin` | Partition-table image.                                                                                                                     |
 
 For normal development, prefer `arduino-cli compile --upload` so Arduino places
 each image at the correct address. Use the merged image when a flashing tool
-expects one complete binary.
+expects one complete binary and resetting persisted colors is acceptable.
 
 OPI PSRAM is required for the approximately 307 KB RGB565 framebuffer and the
 vendor display driver's full-frame transfer buffer. The sketch stops with a
@@ -193,7 +211,7 @@ From a Visual Studio Developer PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force build | Out-Null
-cl /std:c++17 /EHsc `
+cl /std:c++20 /EHsc `
   /Fo:build\color_math_tests.obj `
   /Fe:build\color_math_tests.exe `
   tests\color_math_tests.cpp
@@ -202,7 +220,8 @@ cl /std:c++17 /EHsc `
 
 The tests cover primary and round-trip color conversion, wheel bounds,
 brightness mapping, preset tap/hold/cancel behavior, mode transitions, rainbow
-and breathing math, microphone-envelope smoothing, and timer rollover.
+and breathing math, microphone-envelope smoothing, persistence timing and
+cancellation, packed-color storage, and timer rollover.
 
 ## Driving an external NeoPixel array on P2
 
@@ -256,6 +275,7 @@ After flashing:
    strip and onboard LED channel order.
 3. Tap P1-P4 and verify the selected color changes once.
 4. Hold P1-P4 until `SAVED`, select another color, then tap the saved preset.
+   Reboot and confirm the stored preset remains.
 5. Sweep brightness to both endpoints.
 6. Turn output off, change color and brightness, then turn it on and verify the
    latest settings are restored.
@@ -269,6 +289,10 @@ After flashing:
    overwritten.
 11. With the external NeoPixel array connected, power-cycle and reset the board
    several times and confirm reliable booting.
+12. Select a solid color, wait at least two minutes without changing it, reboot,
+    and confirm it is restored.
+13. Select a solid color, enter rainbow or music before two minutes elapse,
+    reboot, and confirm the effect-generated color was not stored.
 
 Microphone sensitivity and the perceived breathing speed require final tuning
 on the physical board. If microphone initialization fails, Serial reports a
@@ -281,19 +305,35 @@ The UI uses a 16-bit TFT_eSPI sprite backed by the PSRAM-enabled ESP32 allocator
 and sends that buffer through Elecrow's ST77922 QSPI driver.
 
 Touch processing uses a non-blocking state machine, including long-press
-detection. The same loop schedules effect frames every 25 ms, so no coroutine
-library is needed.
+detection. Fixed-memory SimpleAwait C++20 tasks schedule touch polling, effect
+frames, effect UI refreshes, audio initialization/feedback, and delayed NVS
+writes. Arduino `loop()` contains only `simpleawait::poll()`; application waits
+use coroutine delay primitives rather than blocking delay calls. The vendored
+ESP32 scheduler yields one RTOS tick when no coroutine is ready so driver and
+idle work are not starved by the poll-only Arduino loop.
+
+The initial framebuffer is transferred before touch-controller initialization.
+Touch startup bounds stale-status retries and reports I2C/status failure rather
+than leaving the panel on its uninitialized pixel pattern indefinitely.
+Display SPI and touch I2C are initialized explicitly from `setup()`; their
+global C++ constructors never access hardware, which keeps cold power-on
+behavior consistent with warm resets. The display backlight remains off until
+the first complete framebuffer transfer, so uninitialized panel memory is never
+shown during cold-start NVS and color-wheel setup.
 
 ### Classes and components
 
 | Component               | Responsibility                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ControllerModel`       | Owns the selected color, brightness, power state, active output mode, and four RAM-only presets.                          |
+| `ControllerModel`       | Owns the selected color, brightness, power state, active output mode, and four presets.                                   |
+| `PersistentState`       | Restores and deduplicates Preferences/NVS writes for presets and the stable selected color.                               |
+| `ManualColorSaveTracker` | Tracks manual color changes, cancellation, rollover-safe elapsed time, and save readiness.                                |
+| `SimpleAwait`           | Runs fixed-memory cooperative tasks for touch, effects, UI refresh, audio sequencing, and persistence.                   |
 | `PresetGesture`         | Distinguishes a preset tap from a 700 ms hold and guarantees that a stored preset is not also recalled on release.       |
 | `RgbColor` / `HsvColor` | Small color value types shared by the model, renderer, tests, and NeoPixel adapter.                                      |
 | `ColorMath` functions   | Convert RGB/HSV values, map wheel coordinates to color, and map slider coordinates to brightness.                        |
 | `ReactiveLighting`      | Provides host-tested rainbow, breathing, music-color, brightness-scaling, and adaptive audio-envelope math.              |
-| `AudioFeedback`         | Runs duplex ES8311 audio for touch beeps and non-blocking onboard microphone amplitude samples.                          |
+| `AudioFeedback`         | Asynchronously initializes duplex ES8311 audio, queues touch beeps, and reads non-blocking microphone amplitude samples. |
 | `TouchState`            | Records which control captured the active touch plus its latest coordinates until release debounce completes.            |
 | `ColorController.ino`   | Composes the hardware drivers, model, renderer, touch routing, and Arduino `setup()`/`loop()` lifecycle.                 |
 

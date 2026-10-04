@@ -5,9 +5,12 @@
 #include <TFT_eSPI.h>
 
 #include "AudioFeedback.h"
+#include "AwaitConfig.h"
 #include "ColorMath.h"
 #include "Config.h"
 #include "ControllerModel.h"
+#include "PersistencePolicy.h"
+#include "PersistentState.h"
 #include "PresetGesture.h"
 #include "ReactiveLighting.h"
 
@@ -73,14 +76,17 @@ ControllerModel model;
 TouchState touchState;
 PresetGesture presetGesture;
 MusicEnvelope musicEnvelope;
+PersistentState persistentState;
+ManualColorSaveTracker manualColorSave;
+RgbColor pendingPresetColors[ControllerModel::kPresetCount] = {};
+bool pendingPresetSaves[ControllerModel::kPresetCount] = {};
+uint32_t presetSaveRetryAt[ControllerModel::kPresetCount] = {};
 bool wasTouched = false;
 uint8_t noTouchPolls = 0;
 int8_t savedPreset = -1;
 uint32_t savedFeedbackUntil = 0;
 int16_t markerX = -1;
 int16_t markerY = -1;
-uint32_t lastEffectFrame = 0;
-uint32_t lastEffectUiFrame = 0;
 RgbColor effectPreviewColor = {255, 0, 0};
 
 // Converts model RGB values to the display framebuffer's RGB565 format.
@@ -377,7 +383,9 @@ void selectWheelColor(int16_t x, int16_t y) {
     return;
   }
   model.select(color);
-  applyPixelOutput();
+  const uint32_t now = millis();
+  manualColorSave.noteChange(color, now);
+  applyPixelOutput(now);
   drawDynamicUi();
 }
 
@@ -450,6 +458,10 @@ void updatePresetHold(uint32_t now) {
                            Config::kPresetHoldMs) == PresetGestureEvent::kStore) {
     model.storePreset(touchState.presetIndex);
     model.setMode(OutputMode::kSolid);
+    manualColorSave.noteChange(model.selected(), now);
+    pendingPresetColors[touchState.presetIndex] = model.selected();
+    pendingPresetSaves[touchState.presetIndex] = true;
+    presetSaveRetryAt[touchState.presetIndex] = now;
     savedPreset = touchState.presetIndex;
     savedFeedbackUntil = now + Config::kSavedFeedbackMs;
     applyPixelOutput(now);
@@ -469,6 +481,7 @@ void handleTouchUp() {
       model.select(preset);
       applyPixelOutput();
       drawDynamicUi();
+      manualColorSave.noteChange(preset, millis());
     }
     AudioFeedback::beep();
   } else if (touchState.target == TouchTarget::kPreset &&
@@ -481,12 +494,11 @@ void handleTouchUp() {
             ? OutputMode::kRainbow
             : OutputMode::kMusic;
     model.setMode(mode);
+    manualColorSave.cancel();
     if (mode == OutputMode::kMusic) {
       musicEnvelope.reset();
     }
-    lastEffectFrame = millis();
-    lastEffectUiFrame = lastEffectFrame;
-    applyPixelOutput(lastEffectFrame);
+    applyPixelOutput();
     drawDynamicUi();
     AudioFeedback::beep();
   } else if (touchState.target == TouchTarget::kPower &&
@@ -503,25 +515,141 @@ void handleTouchUp() {
   touchState = {};
 }
 
+simpleawait::Task<void> monitorTouchInput() {
+  while (true) {
+    const uint32_t now = millis();
+    const bool isTouched = touch.Get_Touch();
+    if (isTouched) {
+      const int16_t x =
+          constrain(static_cast<int16_t>(touch.touch.x[0]), 0, Ui::kWidth - 1);
+      const int16_t y =
+          constrain(static_cast<int16_t>(touch.touch.y[0]), 0, Ui::kHeight - 1);
+      if (!wasTouched) {
+        handleTouchDown(x, y, now);
+      } else {
+        handleTouchMove(x, y);
+      }
+      noTouchPolls = 0;
+      wasTouched = true;
+    } else if (wasTouched && ++noTouchPolls >= Config::kReleaseDebouncePolls) {
+      handleTouchUp();
+      wasTouched = false;
+      noTouchPolls = 0;
+    }
+    updatePresetHold(now);
+
+    if (savedPreset >= 0 &&
+        static_cast<int32_t>(now - savedFeedbackUntil) >= 0) {
+      const uint8_t expiredPreset = savedPreset;
+      savedPreset = -1;
+      drawControl(expiredPreset);
+      flushDisplay();
+    }
+
+    uint8_t error = 0;
+    if (AwaitStatus::take(error)) {
+      Serial.printf("WARNING: coroutine scheduler error %u\n", error);
+    }
+    co_await simpleawait::delay_ms(Config::kTouchPollMs);
+  }
+}
+
+simpleawait::Task<void> updateEffects() {
+  while (true) {
+    co_await simpleawait::delay_ms(Config::kEffectFrameMs);
+    if (model.powerOn() && model.mode() != OutputMode::kSolid) {
+      applyPixelOutput();
+    }
+  }
+}
+
+simpleawait::Task<void> updateEffectUi() {
+  while (true) {
+    co_await simpleawait::delay_ms(Config::kEffectUiFrameMs);
+    if (model.mode() != OutputMode::kSolid) {
+      drawColorStrip();
+      drawBrightnessControl();
+      flushDisplay();
+    }
+  }
+}
+
+simpleawait::Task<void> persistStableManualColor() {
+  while (true) {
+    co_await simpleawait::delay_ms(Config::kPersistencePollMs);
+    const uint32_t now = millis();
+    for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
+      if (!pendingPresetSaves[index] ||
+          static_cast<int32_t>(now - presetSaveRetryAt[index]) < 0) {
+        continue;
+      }
+      if (persistentState.savePreset(index, pendingPresetColors[index])) {
+        pendingPresetSaves[index] = false;
+      } else {
+        Serial.printf("WARNING: unable to persist preset P%u\n", index + 1);
+        presetSaveRetryAt[index] = now + Config::kPersistenceRetryMs;
+      }
+    }
+
+    if (!manualColorSave.ready(now, Config::kManualColorSaveDelayMs)) {
+      continue;
+    }
+    if (model.mode() != OutputMode::kSolid ||
+        model.selected() != manualColorSave.color()) {
+      manualColorSave.cancel();
+      continue;
+    }
+    const RgbColor color = manualColorSave.color();
+    if (!persistentState.saveSelectedColor(color)) {
+      Serial.println("WARNING: unable to persist selected color");
+      manualColorSave.noteChange(color, now);
+    } else {
+      manualColorSave.markSaved();
+    }
+  }
+}
+
+simpleawait::Task<void> reportFramebufferFailure() {
+  while (true) {
+    Serial.println("FATAL: unable to allocate the display framebuffer");
+    co_await simpleawait::delay_ms(1000);
+  }
+}
+
+simpleawait::Task<void> reportDisplayFailure() {
+  while (true) {
+    Serial.println("FATAL: display initialization failed");
+    co_await simpleawait::delay_ms(1000);
+  }
+}
+
+bool startControllerTask(simpleawait::Task<void>&& task, const char* name) {
+  const simpleawait::TaskHandle handle =
+      simpleawait::create_task(static_cast<simpleawait::Task<void>&&>(task));
+  if (handle.valid()) {
+    return true;
+  }
+  Serial.printf("FATAL: unable to start %s coroutine\n", name);
+  return false;
+}
+
 void setup() {
   Serial.begin(115200);
 
+  if (!display.begin()) {
+    startControllerTask(reportDisplayFailure(), "display failure reporter");
+    return;
+  }
   display.Set_Rotation(Config::kDisplayRotation);
-  touch.init();
-  touch.Set_Rotation(Config::kDisplayRotation);
 
-  if (!AudioFeedback::begin(g_touchI2CBus)) {
-    Serial.println("WARNING: audio I/O init failed; beeps or microphone may be unavailable");
-  } else if (!AudioFeedback::microphoneAvailable()) {
-    Serial.println("WARNING: microphone init failed; music mode uses fallback glow");
+  if (!persistentState.begin(model)) {
+    Serial.println("WARNING: persistent color storage unavailable");
   }
 
   canvas.setColorDepth(16);
   if (canvas.createSprite(Ui::kWidth, Ui::kHeight) == nullptr) {
-    Serial.println("FATAL: unable to allocate the display framebuffer");
-    while (true) {
-      delay(1000);
-    }
+    startControllerTask(reportFramebufferFailure(), "framebuffer failure reporter");
+    return;
   }
   canvas.setSwapBytes(true);
 
@@ -533,48 +661,22 @@ void setup() {
   }
   applyPixelOutput();
   drawInitialUi();
+  display.Set_Backlight(true);
+
+  if (!touch.init()) {
+    Serial.println("WARNING: touch initialization did not reach an idle state");
+  }
+  touch.Set_Rotation(Config::kDisplayRotation);
+
+  startControllerTask(monitorTouchInput(), "touch input");
+  startControllerTask(updateEffects(), "LED effects");
+  startControllerTask(updateEffectUi(), "effect UI");
+  startControllerTask(persistStableManualColor(), "persistence");
+  if (!AudioFeedback::start(g_touchI2CBus)) {
+    Serial.println("FATAL: unable to start audio coroutine");
+  }
 }
 
 void loop() {
-  const uint32_t now = millis();
-  const bool isTouched = touch.Get_Touch();
-  if (isTouched) {
-    const int16_t x = constrain(static_cast<int16_t>(touch.touch.x[0]), 0, Ui::kWidth - 1);
-    const int16_t y =
-        constrain(static_cast<int16_t>(touch.touch.y[0]), 0, Ui::kHeight - 1);
-    if (!wasTouched) {
-      handleTouchDown(x, y, now);
-    } else {
-      handleTouchMove(x, y);
-    }
-    noTouchPolls = 0;
-    wasTouched = true;
-  } else if (wasTouched && ++noTouchPolls >= Config::kReleaseDebouncePolls) {
-    handleTouchUp();
-    wasTouched = false;
-    noTouchPolls = 0;
-  }
-  updatePresetHold(now);
-
-  if (model.powerOn() && model.mode() != OutputMode::kSolid &&
-      now - lastEffectFrame >= Config::kEffectFrameMs) {
-    lastEffectFrame = now;
-    applyPixelOutput(now);
-  }
-  if (model.mode() != OutputMode::kSolid &&
-      now - lastEffectUiFrame >= Config::kEffectUiFrameMs) {
-    lastEffectUiFrame = now;
-    drawColorStrip();
-    drawBrightnessControl();
-    flushDisplay();
-  }
-
-  if (savedPreset >= 0 &&
-      static_cast<int32_t>(now - savedFeedbackUntil) >= 0) {
-    const uint8_t expiredPreset = savedPreset;
-    savedPreset = -1;
-    drawControl(expiredPreset);
-    flushDisplay();
-  }
-  delay(5);
+  simpleawait::poll();
 }

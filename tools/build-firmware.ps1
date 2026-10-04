@@ -8,11 +8,20 @@ param(
 
     [switch] $VerboseOutput,
 
+    [switch] $UploadOnly,
+
     [switch] $Clean
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+if ($UploadOnly -and -not $Port) {
+    throw "-UploadOnly requires -Port."
+}
+if ($UploadOnly -and $Clean) {
+    throw "-UploadOnly cannot be combined with -Clean."
+}
 
 $coreList = arduino-cli core list
 if ($LASTEXITCODE -ne 0) {
@@ -67,10 +76,14 @@ $arguments = @(
     "tools.gen_insights_pkg.cmd.windows=$toolPath\gen_insights_package.cmd"
 )
 
+$extraFlags = @()
 if ($ExternalPixelCount -gt 0) {
+    $extraFlags += "-DCOLOR_CONTROLLER_EXTERNAL_PIXEL_COUNT=$ExternalPixelCount"
+}
+if ($extraFlags.Count -gt 0) {
     $arguments += @(
         "--build-property"
-        "compiler.cpp.extra_flags=-DCOLOR_CONTROLLER_EXTERNAL_PIXEL_COUNT=$ExternalPixelCount"
+        "compiler.cpp.extra_flags=$($extraFlags -join ' ')"
     )
 }
 
@@ -93,31 +106,52 @@ try {
         throw "Timed out waiting for another color-controller firmware build to finish."
     }
 
-    if ($Clean -or -not (Test-Path -LiteralPath $successMarker -PathType Leaf)) {
-        $arguments += "--clean"
-    }
-    Remove-Item -LiteralPath $successMarker -Force -ErrorAction SilentlyContinue
-    & arduino-cli @arguments
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -eq 0) {
-        New-Item -ItemType Directory -Force -Path $buildDirectory | Out-Null
-        Set-Content -LiteralPath $successMarker -Value (Get-Date -Format o)
-        if ($Port) {
-            $mergedBinary = Join-Path $outputDirectory "ColorController.ino.merged.bin"
-            & python -m esptool `
-                --chip esp32s3 `
-                --port $Port `
-                --baud 921600 `
-                --before default-reset `
-                --after hard-reset `
-                write-flash `
-                --flash-mode keep `
-                --flash-freq keep `
-                --flash-size keep `
-                0x0 `
-                $mergedBinary
-            $exitCode = $LASTEXITCODE
+    if (-not $UploadOnly) {
+        if ($Clean -or -not (Test-Path -LiteralPath $successMarker -PathType Leaf)) {
+            $arguments += "--clean"
         }
+        Remove-Item -LiteralPath $successMarker -Force -ErrorAction SilentlyContinue
+        & arduino-cli @arguments
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {
+            New-Item -ItemType Directory -Force -Path $buildDirectory | Out-Null
+            Set-Content -LiteralPath $successMarker -Value (Get-Date -Format o)
+        }
+    } else {
+        $exitCode = 0
+    }
+
+    if ($exitCode -eq 0 -and $Port) {
+        $bootloader = Join-Path $outputDirectory "ColorController.ino.bootloader.bin"
+        $partitions = Join-Path $outputDirectory "ColorController.ino.partitions.bin"
+        $application = Join-Path $outputDirectory "ColorController.ino.bin"
+        $bootApp = Join-Path $env:ARDUINO_ESP32_PLATFORM_PATH "tools\partitions\boot_app0.bin"
+        $requiredImages = @($bootloader, $partitions, $application, $bootApp)
+        $missingImages = $requiredImages | Where-Object {
+            -not (Test-Path -LiteralPath $_ -PathType Leaf)
+        }
+        if ($missingImages) {
+            throw "Required firmware image not found: $($missingImages -join ', '). Build first without -UploadOnly."
+        }
+        & python -m esptool `
+            --chip esp32s3 `
+            --port $Port `
+            --baud 921600 `
+            --before default-reset `
+            --after hard-reset `
+            write-flash `
+            --flash-mode keep `
+            --flash-freq keep `
+            --flash-size keep `
+            0x0 `
+            $bootloader `
+            0x8000 `
+            $partitions `
+            0xe000 `
+            $bootApp `
+            0x10000 `
+            $application
+        $exitCode = $LASTEXITCODE
     }
 } finally {
     if ($lockAcquired) {

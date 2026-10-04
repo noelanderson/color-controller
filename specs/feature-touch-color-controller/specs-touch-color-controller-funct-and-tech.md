@@ -35,6 +35,9 @@ The UI state is independent of the LED transport. Version 1 uses the onboard Neo
 - [x] Four preset buttons show their stored colors.
 - [x] A short preset touch selects and applies that preset color.
 - [x] A preset touch held for at least 700 ms stores the current wheel color without also firing the short-touch action.
+- [x] Stored presets survive reboot and power loss.
+- [x] A manually selected solid color is stored after two minutes without a change.
+- [x] Rainbow and music colors are never stored as the selected startup color.
 - [x] P5 activates a full-spectrum rainbow with a slow breathing envelope.
 - [x] P6 shows a musical-note icon and pulses color/brightness from onboard mic input.
 - [x] The power control turns NeoPixel output off and restores the selected color when turned back on.
@@ -55,7 +58,6 @@ The UI state is independent of the LED transport. Version 1 uses the onboard Neo
 
 ### Out of Scope
 
-- Persistent preset storage across power cycles.
 - User-configurable effect speed, microphone sensitivity, FFT bands, color
   temperature controls, or per-pixel editing.
 - Wi-Fi, Bluetooth, SD card, and battery telemetry.
@@ -65,7 +67,7 @@ The UI state is independent of the LED transport. Version 1 uses the onboard Neo
 ### Open Questions (Functional)
 
 - [ ] Validate the physical screen/touch orientation and color channel order on the target unit.
-- [ ] Decide whether a future release should persist presets in ESP32 Preferences/NVS.
+- [x] Persist presets and stable manually selected colors in ESP32 Preferences/NVS.
 
 ---
 
@@ -75,18 +77,20 @@ The UI state is independent of the LED transport. Version 1 uses the onboard Neo
 
 This is a new Arduino sketch with four responsibilities:
 
-1. `ColorController.ino` initializes the hardware and runs the input/render loop.
+1. `ColorController.ino` initializes hardware and composes the cooperative tasks.
 2. `ControllerModel` owns color, brightness, power, presets, and the active output mode.
 3. `ColorMath` and `ReactiveLighting` provide host-tested geometry, color, animation, and audio-envelope calculations.
 4. `AudioFeedback` runs ES8311 speaker output and onboard microphone input over duplex I2S.
-5. The ST77922 display/touch drivers are consumed from the supplied vendor resource pack.
+5. `PersistentState` stores deduplicated RGB values in ESP32 Preferences/NVS.
+6. SimpleAwait C++20 tasks own touch, effects, effect UI, audio, and persistence.
+7. The ST77922 display/touch drivers are consumed from the supplied vendor resource pack.
 
 `Adafruit_NeoPixel` is the LED transport. `TFT_eSPI` supplies a PSRAM-backed software sprite used as the RGB565 framebuffer; the vendor ST77922 driver transfers that framebuffer to the QSPI display.
 
 ### Dependencies
 
 - **Internal:** Supplied `ST77922` and `ST77922_Touch` board drivers in the resource pack.
-- **External:** ESP32 Arduino core 3.3.x, TFT_eSPI 2.5.x, Adafruit NeoPixel 1.12 or newer.
+- **External:** ESP32 Arduino core 3.3.x, TFT_eSPI 2.5.x, Adafruit NeoPixel 1.12 or newer, and SimpleAwait 1.0.1.
 - **Hardware:** Elecrow DLE06235B, onboard NeoPixel on GPIO 40, ES8311 analog
   microphone input on I2S GPIO 16, and optional external signal on P2 GPIO 45.
 
@@ -95,7 +99,9 @@ This is a new Arduino sketch with four responsibilities:
 - [x] Compile for `esp32:esp32:esp32s3` with 16 MB flash and OPI PSRAM enabled.
 - [x] Use display and touch rotation 1 so both coordinate systems are 480x320.
 - [x] Allocate the 16-bit framebuffer in PSRAM and fail visibly over Serial if allocation fails.
-- [x] Keep the main loop non-blocking except for a small polling yield.
+- [x] Keep the main loop limited to `simpleawait::poll()`.
+- [x] Use SimpleAwait delay primitives instead of application-level blocking
+  delay calls.
 - [x] Clamp all touch coordinates and computed values to valid ranges.
 - [x] Separate state transitions and color math from hardware writes where practical.
 - [x] Avoid writing the NeoPixel or display when state has not changed.
@@ -103,12 +109,20 @@ This is a new Arduino sketch with four responsibilities:
 - [x] Read microphone blocks with zero-timeout I2S calls and smooth the level
   with an adaptive noise floor and attack/release envelope.
 - [x] Compile with the exact vendor libraries included in `resource-pack`.
+- [x] Deduplicate NVS writes and write selected colors only after 120 seconds of stability.
+- [x] Cancel pending selected-color writes when rainbow or music mode starts.
+- [x] Render the initial framebuffer before bounded touch-controller startup,
+  reject invalid touch-count values, and continue safely after touch I2C failure.
+- [x] Keep global display/touch constructors data-only and initialize SPI, I2C,
+  GPIO, and panel hardware explicitly from Arduino `setup()` for reliable cold boot.
+- [x] Keep the panel backlight off until the initial full framebuffer transfer
+  completes so cold boot never exposes uninitialized display memory.
 
 ### Implementation Considerations
 
-- **Approach:** Draw the expensive color wheel once into the sprite. Redraw only dynamic controls in the framebuffer, then transfer the complete frame when a visible state changes. Use a touch state machine for input and a separate 25 ms effect tick for LED-only animation.
+- **Approach:** Draw the expensive color wheel once into the sprite. Redraw only dynamic controls in the framebuffer, then transfer the complete frame when a visible state changes. Run the touch state machine and the separate 25 ms LED effect tick as fixed-memory SimpleAwait tasks.
 - **Risks:** Physical touch rotation and microphone sensitivity need on-device confirmation; the vendor touch driver depends on ESP-IDF 5 APIs; large framebuffer allocation requires PSRAM; external arrays require separate 5 V power, common ground, signal conditioning, and power budgeting.
-- **Alternatives considered:** LVGL adds substantial configuration and is unnecessary for this single screen. Direct rendering without a framebuffer complicates wheel marker restoration and partial updates. SimpleAwait is not needed because the event loop's independent timers remain clearer as cooperative state machines.
+- **Alternatives considered:** LVGL adds substantial configuration and is unnecessary for this single screen. Direct rendering without a framebuffer complicates wheel marker restoration and partial updates. Hand-written loop timers were replaced by cooperative SimpleAwait tasks so all runtime scheduling follows one model.
 
 ### Open Questions (Technical)
 
@@ -132,7 +146,8 @@ This is a new Arduino sketch with four responsibilities:
 
 - The vendor examples identify ST77922 QSPI display pins, touch I2C pins, onboard NeoPixel GPIO 40, and landscape rotation behavior.
 - P2 exposes GPIO 45 and GPIO 46, but ESP32-S3 GPIO 46 is input-only. The output configuration defaults to GPIO 40 and one pixel, with documented constants for migration to GPIO 45.
-- Use ordinary event-loop state machines rather than adding SimpleAwait because no asynchronous sequence benefits from coroutine syntax in this release.
+- Use fixed-memory SimpleAwait tasks for all runtime scheduling; keep Arduino
+  `loop()` limited to polling the scheduler.
 
 ---
 
@@ -197,6 +212,20 @@ This is a new Arduino sketch with four responsibilities:
 - [COMPLETED] Step 6.4 - Complete alternative-model review and document the
   remaining physical tuning checks for microphone sensitivity and breathing speed.
 
+### Stage 7: Persistent Colors and Coroutines
+
+- [COMPLETED] Step 7.1 - Restore P1-P4 and the last stable manually selected
+  solid color from ESP32 Preferences/NVS at startup.
+- [COMPLETED] Step 7.2 - Persist preset changes immediately while deduplicating
+  unchanged flash writes.
+- [COMPLETED] Step 7.3 - Vendor SimpleAwait 1.0.1 and run a fixed-memory C++20
+  coroutine that saves a manually selected color after 120 unchanged seconds.
+- [COMPLETED] Step 7.4 - Cancel pending color persistence on rainbow/music entry
+  and preserve NVS during policy-safe segmented firmware uploads.
+- [COMPLETED] Step 7.5 - Complete adversarial review and resolve persistence,
+  coroutine, upload, and documentation edge cases.
+- [] Step 7.6 - Validate reboot and physical power-cycle persistence on hardware.
+
 ---
 
 ## Learnings & Notes
@@ -209,8 +238,8 @@ This is a new Arduino sketch with four responsibilities:
 - P2 exposes GPIO 45 and GPIO 46, but GPIO 46 is input-only on ESP32-S3. GPIO 45 is the v2 data-output candidate.
 - The matching Freenove echo example identifies GPIO 16 as ES8311 input and
   supplies the analog microphone routing register values used by music mode.
-- Independent timer checks in the existing loop are sufficient for touch,
-  animation, and microphone sampling; SimpleAwait would add complexity here.
+- Independent timer checks remain appropriate for touch, animation, and
+  microphone sampling; SimpleAwait fits the separate delayed persistence flow.
 
 ### Issues Encountered
 
@@ -222,7 +251,6 @@ This is a new Arduino sketch with four responsibilities:
 
 - External NeoPixel arrays should not be powered from a GPIO. Size the 5 V supply for worst-case current, connect grounds, and consider a 3.3 V-to-5 V level shifter and series data resistor.
 - GPIO 45 is a strapping pin, so v2 wiring must not force its level during reset.
-- Preset persistence and runtime output selection are intentionally deferred.
 - Physical touch alignment, perceived refresh responsiveness, and RGB channel order still require validation on the target board.
 - Microphone level, noise-floor adaptation, and breathing cadence require
   final tuning on the physical controller.

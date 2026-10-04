@@ -8,6 +8,7 @@
 
 #include "../src/ColorController/ColorMath.h"
 #include "../src/ColorController/ControllerModel.h"
+#include "../src/ColorController/PersistencePolicy.h"
 #include "../src/ColorController/PresetGesture.h"
 #include "../src/ColorController/ReactiveLighting.h"
 
@@ -129,6 +130,33 @@ void testMusicEnvelope() {
   assert(envelope.level() == 0);
 }
 
+void testPersistencePolicy() {
+  constexpr RgbColor color = {12, 34, 56};
+  static_assert(packColor(color) == 0x0C2238);
+  static_assert(unpackColor(0x0C2238) == color);
+
+  ManualColorSaveTracker tracker;
+  assert(!tracker.pending());
+  tracker.noteChange(color, 1000);
+  assert(tracker.pending());
+  assert(!tracker.ready(120999, 120000));
+  assert(tracker.ready(121000, 120000));
+
+  const RgbColor changed = {70, 80, 90};
+  tracker.noteChange(changed, 60000);
+  assert(!tracker.ready(121000, 120000));
+  assert(tracker.ready(180000, 120000));
+  assert(tracker.color() == changed);
+
+  tracker.cancel();
+  assert(!tracker.ready(300000, 120000));
+
+  tracker.noteChange(color, UINT32_MAX - 1000);
+  assert(tracker.ready(119000, 120000));
+  tracker.markSaved();
+  assert(!tracker.pending());
+}
+
 }  // namespace
 
 int main() {
@@ -140,6 +168,7 @@ int main() {
   testControllerModes();
   testReactiveLightingMath();
   testMusicEnvelope();
+  testPersistencePolicy();
   std::cout << "Color math tests passed\n";
   return 0;
 }
