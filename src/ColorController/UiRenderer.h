@@ -3,8 +3,12 @@
 #include <ST77922.h>
 #include <TFT_eSPI.h>
 
+#include "BrightnessSliderControl.h"
 #include "ColorMath.h"
+#include "ColorPreviewControl.h"
+#include "ColorWheelControl.h"
 #include "ControllerModel.h"
+#include "PowerButtonControl.h"
 #include "UiLayout.h"
 
 /**
@@ -15,7 +19,9 @@
  */
 class UiRenderer {
  public:
-  UiRenderer(TFT_eSprite& canvas, ST77922& display, ControllerModel& model);
+  UiRenderer(TFT_eSprite& canvas, ST77922& display, ControllerModel& model, ColorWheelControl& colorWheel,
+             BrightnessSliderControl& brightnessSlider, PowerButtonControl& powerButton,
+             ColorPreviewControl& colorPreview);
 
   void flushDisplay();
   void drawColorStrip(const RgbColor& effectPreviewColor);
@@ -30,19 +36,15 @@ class UiRenderer {
   void expireSavedPreset(uint32_t now);
 
  private:
-  uint16_t toRgb565(const RgbColor& color);
-  void drawCenteredText(const char* text, int16_t centerX, int16_t centerY, uint16_t foreground,
-                        uint16_t background, uint8_t size = Ui::kDefaultTextSize);
-  void drawColorWheel();
-  void restoreMarkerBackground();
-  void drawWheelMarker();
   void drawControls();
 
   TFT_eSprite& canvas_;
   ST77922& display_;
   ControllerModel& model_;
+  ColorWheelControl& colorWheel_;
+  BrightnessSliderControl& brightnessSlider_;
+  PowerButtonControl& powerButton_;
+  ColorPreviewControl& colorPreview_;
   int8_t savedPreset_ = -1;
   uint32_t savedFeedbackUntil_ = 0;
-  int16_t markerX_ = -1;
-  int16_t markerY_ = -1;
 };

@@ -229,6 +229,19 @@ The repository-owned `AddressableLedStrip` class provides the minimal WS2812-com
   coroutine, upload, and documentation edge cases.
 - [] Step 7.6 - Validate reboot and physical power-cycle persistence on hardware.
 
+### Stage 8: Self-Contained UX Controls
+
+- [COMPLETED] Step 8.1 - Extract color-wheel hit testing, coordinate mapping,
+  rendering, and marker state into a self-contained control.
+- [COMPLETED] Step 8.2 - Extract brightness slider, power button, and color preview
+  rendering and touch behavior into focused controls.
+- [] Step 8.3 - Extract P1-P6 hit testing, press/hold/release state, saved
+  feedback, icons, and rendering into a preset/mode control group.
+- [] Step 8.4 - Reduce `UiRenderer` to framebuffer coordination and
+  `InteractionController` to routing semantic control events.
+- [] Step 8.5 - Complete host tests, clean firmware builds, alternative-model
+  review, and physical touch verification for the componentized UI.
+
 ---
 
 ## Learnings & Notes

@@ -1,82 +1,29 @@
 #include "UiRenderer.h"
 
 #include <Arduino.h>
-#include <math.h>
 
 #include "AudioFeedback.h"
+#include "UiDrawing.h"
 
-UiRenderer::UiRenderer(TFT_eSprite& canvas, ST77922& display, ControllerModel& model)
-    : canvas_(canvas), display_(display), model_(model) {}
-
-uint16_t UiRenderer::toRgb565(const RgbColor& color) {
-  return canvas_.color565(color.red, color.green, color.blue);
-}
+UiRenderer::UiRenderer(TFT_eSprite& canvas, ST77922& display, ControllerModel& model,
+                       ColorWheelControl& colorWheel, BrightnessSliderControl& brightnessSlider,
+                       PowerButtonControl& powerButton, ColorPreviewControl& colorPreview)
+    : canvas_(canvas),
+      display_(display),
+      model_(model),
+      colorWheel_(colorWheel),
+      brightnessSlider_(brightnessSlider),
+      powerButton_(powerButton),
+      colorPreview_(colorPreview) {}
 
 void UiRenderer::flushDisplay() {
   // Rotation 1 requires a full-frame transfer beginning at the panel origin.
   display_.Fill_Colors(0, 0, Ui::kWidth, Ui::kHeight, static_cast<uint16_t*>(canvas_.getPointer()));
 }
 
-void UiRenderer::drawCenteredText(const char* text, int16_t centerX, int16_t centerY, uint16_t foreground,
-                                  uint16_t background, uint8_t size) {
-  canvas_.setTextDatum(MC_DATUM);
-  canvas_.setTextColor(foreground, background);
-  canvas_.setTextSize(size);
-  canvas_.drawString(text, centerX, centerY);
-}
-
 void UiRenderer::drawColorStrip(const RgbColor& effectPreviewColor) {
   const RgbColor& color = model_.mode() == OutputMode::kSolid ? model_.selected() : effectPreviewColor;
-  canvas_.fillRect(0, 0, Ui::kWidth, Ui::kColorStripHeight, toRgb565(color));
-  canvas_.drawFastHLine(0, Ui::kColorStripHeight - 1, Ui::kWidth, Ui::kWhite);
-}
-
-void UiRenderer::drawColorWheel() {
-  for (int16_t y = Ui::kWheelCenterY - Ui::kWheelRadius; y <= Ui::kWheelCenterY + Ui::kWheelRadius; ++y) {
-    for (int16_t x = Ui::kWheelCenterX - Ui::kWheelRadius; x <= Ui::kWheelCenterX + Ui::kWheelRadius; ++x) {
-      RgbColor color;
-      if (colorFromWheel(x, y, Ui::kWheelCenterX, Ui::kWheelCenterY, Ui::kWheelRadius, color)) {
-        canvas_.drawPixel(x, y, toRgb565(color));
-      }
-    }
-  }
-  canvas_.drawCircle(Ui::kWheelCenterX, Ui::kWheelCenterY, Ui::kWheelRadius, Ui::kWhite);
-}
-
-void UiRenderer::restoreMarkerBackground() {
-  if (markerX_ < 0 || markerY_ < 0) {
-    return;
-  }
-  // Recompute only the previous marker footprint; redrawing the wheel during a
-  // drag is too expensive for responsive touch handling.
-  for (int16_t y = markerY_ - Ui::kWheelMarkerRestoreRadius; y <= markerY_ + Ui::kWheelMarkerRestoreRadius;
-       ++y) {
-    for (int16_t x = markerX_ - Ui::kWheelMarkerRestoreRadius; x <= markerX_ + Ui::kWheelMarkerRestoreRadius;
-         ++x) {
-      RgbColor color;
-      if (colorFromWheel(x, y, Ui::kWheelCenterX, Ui::kWheelCenterY, Ui::kWheelRadius, color)) {
-        canvas_.drawPixel(x, y, toRgb565(color));
-      } else if (x >= 0 && x < Ui::kWidth && y >= Ui::kColorStripHeight && y < Ui::kHeight) {
-        canvas_.drawPixel(x, y, Ui::kBackground);
-      }
-    }
-  }
-  canvas_.drawCircle(Ui::kWheelCenterX, Ui::kWheelCenterY, Ui::kWheelRadius, Ui::kWhite);
-}
-
-void UiRenderer::drawWheelMarker() {
-  restoreMarkerBackground();
-  const HsvColor hsv = rgbToHsv(model_.selected());
-  const float distance = static_cast<float>(hsv.saturation) * Ui::kWheelRadius / kColorChannelMax;
-  const float angle = static_cast<float>(hsv.hue) * kPi / (kHueCircleDegrees / 2.0f);
-  markerX_ = Ui::kWheelCenterX + lroundf(cosf(angle) * distance);
-  markerY_ = Ui::kWheelCenterY + lroundf(sinf(angle) * distance);
-  const uint16_t outline = (model_.selected().red + model_.selected().green + model_.selected().blue) >
-                                   Ui::kMarkerLightColorThreshold
-                               ? Ui::kBlack
-                               : Ui::kWhite;
-  canvas_.drawCircle(markerX_, markerY_, Ui::kWheelMarkerRadius, outline);
-  canvas_.drawCircle(markerX_, markerY_, Ui::kWheelMarkerOutlineRadius, outline);
+  colorPreview_.draw(color);
 }
 
 void UiRenderer::drawControl(uint8_t index) {
@@ -95,7 +42,7 @@ void UiRenderer::drawControl(uint8_t index) {
       const int16_t distanceFromCenter =
           abs(static_cast<int16_t>(dot) * Ui::kRainbowArcVerticalScale - (Ui::kRainbowDotCount - 1));
       const int16_t dotY = y + Ui::kRainbowDotBaseY + distanceFromCenter;
-      canvas_.fillCircle(dotX, dotY, Ui::kRainbowDotRadius, toRgb565(color));
+      canvas_.fillCircle(dotX, dotY, Ui::kRainbowDotRadius, Ui::toRgb565(canvas_, color));
     }
     const uint16_t outline = model_.mode() == OutputMode::kRainbow ? Ui::kActive : Ui::kWhite;
     canvas_.drawRoundRect(x, y, Ui::kPresetWidth, Ui::kPresetHeight, Ui::kControlCornerRadius, outline);
@@ -138,7 +85,7 @@ void UiRenderer::drawControl(uint8_t index) {
   }
 
   const RgbColor color = model_.preset(index);
-  const uint16_t fill = toRgb565(color);
+  const uint16_t fill = Ui::toRgb565(canvas_, color);
   const uint16_t text =
       (static_cast<uint16_t>(color.red) * Ui::kRedLuminanceWeight +
        static_cast<uint16_t>(color.green) * Ui::kGreenLuminanceWeight +
@@ -154,7 +101,8 @@ void UiRenderer::drawControl(uint8_t index) {
   } else {
     snprintf(label, sizeof(label), "P%u", index + 1);
   }
-  drawCenteredText(label, x + Ui::kPresetWidth / 2, y + Ui::kPresetHeight / 2, text, fill);
+  Ui::drawCenteredText(canvas_, label, x + Ui::kPresetWidth / 2, y + Ui::kPresetHeight / 2, text, fill,
+                       Ui::kDefaultTextSize);
 }
 
 void UiRenderer::drawControls() {
@@ -163,42 +111,16 @@ void UiRenderer::drawControls() {
   }
 }
 
-void UiRenderer::drawPowerControl() {
-  const uint16_t fill = model_.powerOn() ? Ui::kRed : Ui::kGreen;
-  canvas_.fillRoundRect(Ui::kPowerX, Ui::kPowerY, Ui::kPowerWidth, Ui::kPowerHeight, Ui::kPowerCornerRadius,
-                        fill);
-  canvas_.drawRoundRect(Ui::kPowerX, Ui::kPowerY, Ui::kPowerWidth, Ui::kPowerHeight, Ui::kPowerCornerRadius,
-                        Ui::kWhite);
-  drawCenteredText(model_.powerOn() ? "OFF" : "ON", Ui::kPowerX + Ui::kPowerWidth / 2,
-                   Ui::kPowerY + Ui::kPowerHeight / 2, Ui::kWhite, fill);
-}
+void UiRenderer::drawPowerControl() { powerButton_.draw(model_.powerOn()); }
 
 void UiRenderer::drawBrightnessControl(const RgbColor& effectPreviewColor) {
-  canvas_.fillRect(Ui::kSliderRedrawX, Ui::kSliderRedrawY, Ui::kSliderRedrawWidth, Ui::kSliderRedrawHeight,
-                   Ui::kBackground);
-  canvas_.setTextDatum(TL_DATUM);
-  canvas_.setTextColor(Ui::kWhite, Ui::kBackground);
-  canvas_.setTextSize(Ui::kBrightnessTextSize);
-  canvas_.drawString("BRIGHTNESS", Ui::kSliderStartX, Ui::kSliderLabelY);
-
-  char value[Ui::kBrightnessLabelBufferSize];
-  snprintf(value, sizeof(value), "%u", model_.brightness());
-  canvas_.setTextDatum(TR_DATUM);
-  canvas_.drawString(value, Ui::kSliderEndX, Ui::kSliderLabelY);
-
-  canvas_.fillRoundRect(Ui::kSliderStartX, Ui::kSliderY - Ui::kSliderTrackHalfHeight,
-                        Ui::kSliderEndX - Ui::kSliderStartX, Ui::kSliderTrackHeight,
-                        Ui::kSliderTrackCornerRadius, Ui::kMuted);
-  const int16_t knobX = Ui::kSliderStartX + static_cast<int32_t>(model_.brightness()) *
-                                                (Ui::kSliderEndX - Ui::kSliderStartX) / UINT8_MAX;
   const RgbColor& color = model_.mode() == OutputMode::kSolid ? model_.selected() : effectPreviewColor;
-  canvas_.fillCircle(knobX, Ui::kSliderY, Ui::kSliderKnobRadius, toRgb565(color));
-  canvas_.drawCircle(knobX, Ui::kSliderY, Ui::kSliderKnobRadius, Ui::kWhite);
+  brightnessSlider_.draw(model_.brightness(), color);
 }
 
 void UiRenderer::drawDynamicUi(const RgbColor& effectPreviewColor) {
   drawColorStrip(effectPreviewColor);
-  drawWheelMarker();
+  colorWheel_.drawMarker(model_.selected());
   drawControls();
   drawPowerControl();
   drawBrightnessControl(effectPreviewColor);
@@ -209,7 +131,7 @@ void UiRenderer::drawInitialUi(const RgbColor& effectPreviewColor) {
   canvas_.fillSprite(Ui::kBackground);
   canvas_.fillRoundRect(Ui::kPanelX, Ui::kPanelY, Ui::kPanelWidth, Ui::kPanelHeight, Ui::kPanelCornerRadius,
                         Ui::kPanel);
-  drawColorWheel();
+  colorWheel_.draw();
   drawDynamicUi(effectPreviewColor);
 }
 

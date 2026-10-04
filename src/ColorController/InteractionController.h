@@ -2,9 +2,12 @@
 
 #include <ST77922_Touch.h>
 
+#include "BrightnessSliderControl.h"
 #include "ColorPersistenceService.h"
+#include "ColorWheelControl.h"
 #include "ControllerModel.h"
 #include "LightingOutput.h"
+#include "PowerButtonControl.h"
 #include "PresetGesture.h"
 #include "UiRenderer.h"
 
@@ -15,7 +18,9 @@
 class InteractionController {
  public:
   InteractionController(ST77922_TOUCH& touch, ControllerModel& model, LightingOutput& lighting,
-                        UiRenderer& renderer, ColorPersistenceService& persistence);
+                        UiRenderer& renderer, ColorPersistenceService& persistence,
+                        const ColorWheelControl& colorWheel, const BrightnessSliderControl& brightnessSlider,
+                        const PowerButtonControl& powerButton);
 
   void poll(uint32_t now);
 
@@ -60,6 +65,9 @@ class InteractionController {
   LightingOutput& lighting_;
   UiRenderer& renderer_;
   ColorPersistenceService& persistence_;
+  const ColorWheelControl& colorWheel_;
+  const BrightnessSliderControl& brightnessSlider_;
+  const PowerButtonControl& powerButton_;
   TouchState touchState_;
   PresetGesture presetGesture_;
   ContactState contactState_ = ContactState::kIdle;

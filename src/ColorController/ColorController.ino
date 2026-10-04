@@ -5,11 +5,15 @@
 
 #include "AudioFeedback.h"
 #include "AwaitConfig.h"
+#include "BrightnessSliderControl.h"
 #include "ColorPersistenceService.h"
+#include "ColorPreviewControl.h"
+#include "ColorWheelControl.h"
 #include "Config.h"
 #include "ControllerModel.h"
 #include "InteractionController.h"
 #include "LightingOutput.h"
+#include "PowerButtonControl.h"
 #include "UiLayout.h"
 #include "UiRenderer.h"
 
@@ -20,9 +24,14 @@ ST77922 display;
 ST77922_TOUCH touch;
 ControllerModel model;
 LightingOutput lightingOutput(model);
-UiRenderer uiRenderer(canvas, display, model);
+ColorWheelControl colorWheel(canvas);
+BrightnessSliderControl brightnessSlider(canvas);
+PowerButtonControl powerButton(canvas);
+ColorPreviewControl colorPreview(canvas);
+UiRenderer uiRenderer(canvas, display, model, colorWheel, brightnessSlider, powerButton, colorPreview);
 ColorPersistenceService persistenceService;
-InteractionController interactionController(touch, model, lightingOutput, uiRenderer, persistenceService);
+InteractionController interactionController(touch, model, lightingOutput, uiRenderer, persistenceService,
+                                            colorWheel, brightnessSlider, powerButton);
 
 simpleawait::Task<void> monitorTouchInput() {
   while (true) {

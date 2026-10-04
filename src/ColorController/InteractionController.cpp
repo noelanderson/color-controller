@@ -8,12 +8,22 @@
 
 InteractionController::InteractionController(ST77922_TOUCH& touch, ControllerModel& model,
                                              LightingOutput& lighting, UiRenderer& renderer,
-                                             ColorPersistenceService& persistence)
-    : touch_(touch), model_(model), lighting_(lighting), renderer_(renderer), persistence_(persistence) {}
+                                             ColorPersistenceService& persistence,
+                                             const ColorWheelControl& colorWheel,
+                                             const BrightnessSliderControl& brightnessSlider,
+                                             const PowerButtonControl& powerButton)
+    : touch_(touch),
+      model_(model),
+      lighting_(lighting),
+      renderer_(renderer),
+      persistence_(persistence),
+      colorWheel_(colorWheel),
+      brightnessSlider_(brightnessSlider),
+      powerButton_(powerButton) {}
 
 void InteractionController::selectWheelColor(int16_t x, int16_t y) {
   RgbColor color;
-  if (!colorFromWheel(x, y, Ui::kWheelCenterX, Ui::kWheelCenterY, Ui::kWheelRadius, color) ||
+  if (!colorWheel_.colorAt(x, y, color) ||
       (color == model_.selected() && model_.mode() == OutputMode::kSolid)) {
     return;
   }
@@ -25,7 +35,7 @@ void InteractionController::selectWheelColor(int16_t x, int16_t y) {
 }
 
 void InteractionController::setBrightnessFromTouch(int16_t x) {
-  const uint8_t brightness = brightnessFromX(x, Ui::kSliderStartX, Ui::kSliderEndX);
+  const uint8_t brightness = brightnessSlider_.brightnessAt(x);
   if (brightness == model_.brightness()) {
     return;
   }
@@ -37,8 +47,7 @@ void InteractionController::setBrightnessFromTouch(int16_t x) {
 
 InteractionController::TouchTarget InteractionController::identifyTarget(int16_t x, int16_t y,
                                                                          uint8_t& presetIndex) {
-  RgbColor ignored;
-  if (colorFromWheel(x, y, Ui::kWheelCenterX, Ui::kWheelCenterY, Ui::kWheelRadius, ignored)) {
+  if (colorWheel_.contains(x, y)) {
     return TouchTarget::kWheel;
   }
   for (uint8_t index = 0; index < ControllerModel::kControlCount; ++index) {
@@ -47,11 +56,10 @@ InteractionController::TouchTarget InteractionController::identifyTarget(int16_t
       return TouchTarget::kPreset;
     }
   }
-  if (Ui::contains(x, y, Ui::kPowerX, Ui::kPowerY, Ui::kPowerWidth, Ui::kPowerHeight)) {
+  if (powerButton_.contains(x, y)) {
     return TouchTarget::kPower;
   }
-  if (Ui::contains(x, y, Ui::kSliderTouchX, Ui::kSliderTouchY, Ui::kSliderTouchWidth,
-                   Ui::kSliderTouchHeight)) {
+  if (brightnessSlider_.contains(x, y)) {
     return TouchTarget::kBrightness;
   }
   return TouchTarget::kNone;
@@ -163,8 +171,7 @@ void InteractionController::handlePresetRelease() {
 }
 
 void InteractionController::handlePowerRelease() {
-  if (!Ui::contains(touchState_.lastX, touchState_.lastY, Ui::kPowerX, Ui::kPowerY, Ui::kPowerWidth,
-                    Ui::kPowerHeight)) {
+  if (!powerButton_.contains(touchState_.lastX, touchState_.lastY)) {
     return;
   }
   model_.togglePower();

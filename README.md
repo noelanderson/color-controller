@@ -328,16 +328,21 @@ shown during cold-start NVS and color-wheel setup.
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `ControllerModel`       | Owns the selected color, brightness, power state, active output mode, and four presets.                                   |
 | `InteractionController` | Routes touch gestures into model, lighting, persistence, audio, and UI actions.                                           |
-| `AddressableLedStrip`   | Owns the minimal WS2812-compatible GRB encoder, frame buffer, and ESP32 RMT transport.                                  |
-| `LightingOutput`        | Owns addressable LED outputs, reactive effect state, microphone envelope, and live preview color.                       |
-| `UiRenderer`            | Owns framebuffer rendering, wheel-marker repair, transient saved feedback, and panel transfers.                          |
+| `AddressableLedStrip`   | Owns the minimal WS2812-compatible GRB encoder, frame buffer, and ESP32 RMT transport.                                    |
+| `LightingOutput`        | Owns addressable LED outputs, reactive effect state, microphone envelope, and live preview color.                         |
+| `ColorWheelControl`     | Owns wheel hit testing, color mapping, rendering, and selection-marker repair state.                                     |
+| `BrightnessSliderControl` | Owns slider hit testing, touch-coordinate mapping, labels, track, and knob rendering.                                  |
+| `PowerButtonControl`    | Owns power-button hit testing, state-dependent label/color selection, and rendering.                                     |
+| `ColorPreviewControl`   | Renders the selected solid color or live effect color in the top preview strip.                                          |
+| `UiRenderer`            | Coordinates framebuffer rendering, transient saved feedback, and complete panel transfers.                              |
 | `UiLayout`              | Defines named screen geometry, hit regions, glyph dimensions, and RGB565 theme values.                                   |
+| `UiDrawing`             | Provides shared RGB565 conversion and centered-text primitives for focused UI controls.                                 |
 | `ColorPersistenceService` | Coordinates delayed selected-color writes, queued preset writes, and retry timing.                                     |
 | `PersistentState`       | Restores and deduplicates Preferences/NVS writes for presets and the stable selected color.                               |
 | `ManualColorSaveTracker` | Tracks manual color changes, cancellation, rollover-safe elapsed time, and save readiness.                                |
 | `SimpleAwait`           | Runs fixed-memory cooperative tasks for touch, effects, UI refresh, audio sequencing, and persistence.                   |
 | `PresetGesture`         | Distinguishes a preset tap from a 700 ms hold and guarantees that a stored preset is not also recalled on release.       |
-| `RgbColor` / `HsvColor` | Small color value types shared by the model, renderer, tests, and addressable LED adapter.                              |
+| `RgbColor` / `HsvColor` | Small color value types shared by the model, renderer, tests, and addressable LED adapter.                                |
 | `ColorMath` functions   | Convert RGB/HSV values, map wheel coordinates to color, and map slider coordinates to brightness.                        |
 | `ReactiveLighting`      | Provides host-tested rainbow, breathing, music-color, brightness-scaling, and adaptive audio-envelope math.              |
 | `AudioFeedback`         | Asynchronously initializes duplex ES8311 audio, queues touch beeps, and reads non-blocking microphone amplitude samples. |
