@@ -23,17 +23,14 @@ class ControllerModel {
   static constexpr uint8_t kMusicControlIndex = 5;
 
   /** Creates the model with a red selection and four useful default presets. */
-  ControllerModel()
-      : selected_({255, 0, 0}), brightness_(Config::kInitialBrightness), powerOn_(true) {
+  ControllerModel() : selected_({255, 0, 0}), brightness_(Config::kInitialBrightness), powerOn_(true) {
     presets_[0] = {255, 0, 0};
     presets_[1] = {255, 128, 0};
     presets_[2] = {255, 255, 0};
     presets_[3] = {0, 255, 0};
   }
 
-  const RgbColor& selected() const {
-    return selected_;
-  }
+  const RgbColor& selected() const { return selected_; }
 
   /** Replaces the current color without changing power or brightness. */
   void select(const RgbColor& color) {
@@ -41,34 +38,20 @@ class ControllerModel {
     mode_ = OutputMode::kSolid;
   }
 
-  uint8_t brightness() const {
-    return brightness_;
-  }
+  uint8_t brightness() const { return brightness_; }
 
-  void setBrightness(uint8_t brightness) {
-    brightness_ = brightness;
-  }
+  void setBrightness(uint8_t brightness) { brightness_ = brightness; }
 
-  bool powerOn() const {
-    return powerOn_;
-  }
+  bool powerOn() const { return powerOn_; }
 
-  void togglePower() {
-    powerOn_ = !powerOn_;
-  }
+  void togglePower() { powerOn_ = !powerOn_; }
 
-  OutputMode mode() const {
-    return mode_;
-  }
+  OutputMode mode() const { return mode_; }
 
-  void setMode(OutputMode mode) {
-    mode_ = mode;
-  }
+  void setMode(OutputMode mode) { mode_ = mode; }
 
   /** Returns a preset by index; callers must pass an index below kPresetCount. */
-  const RgbColor& preset(uint8_t index) const {
-    return presets_[index];
-  }
+  const RgbColor& preset(uint8_t index) const { return presets_[index]; }
 
   void setPreset(uint8_t index, const RgbColor& color) {
     if (index < kPresetCount) {
@@ -77,9 +60,7 @@ class ControllerModel {
   }
 
   /** Copies the current selection into a valid preset slot. */
-  void storePreset(uint8_t index) {
-    setPreset(index, selected_);
-  }
+  void storePreset(uint8_t index) { setPreset(index, selected_); }
 
  private:
   RgbColor selected_;

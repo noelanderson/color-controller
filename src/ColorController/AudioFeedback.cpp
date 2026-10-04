@@ -13,25 +13,45 @@ namespace AudioFeedback {
 namespace {
 
 constexpr float kTwoPi = 6.28318530718f;
+constexpr uint8_t kStereoChannelCount = 2;
+constexpr uint32_t kMillisecondsPerSecond = 1000;
+
+enum class FeedbackPattern : uint8_t {
+  kNone,
+  kSingle,
+  kDouble,
+};
 
 es8311_handle_t codec = nullptr;
 i2s_chan_handle_t txChannel = nullptr;
 i2s_chan_handle_t rxChannel = nullptr;
 bool microphoneReady = false;
 bool feedbackReady = false;
-uint8_t requestedToneCount = 0;
+FeedbackPattern requestedFeedback = FeedbackPattern::kNone;
+MicrophoneStatus currentMicrophoneStatus = MicrophoneStatus::kInitializing;
+
+void releaseI2sChannels() {
+  if (txChannel != nullptr) {
+    i2s_del_channel(txChannel);
+    txChannel = nullptr;
+  }
+  if (rxChannel != nullptr) {
+    i2s_del_channel(rxChannel);
+    rxChannel = nullptr;
+  }
+}
 
 bool beginI2s() {
   i2s_chan_config_t chanConfig = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-  chanConfig.dma_frame_num = 64;
+  chanConfig.dma_frame_num = Config::kAudioDmaFrames;
   if (i2s_new_channel(&chanConfig, &txChannel, &rxChannel) != ESP_OK) {
+    releaseI2sChannels();
     return false;
   }
 
   i2s_std_config_t stdConfig = {
       .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(Config::kAudioSampleRate),
-      .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
-                                                      I2S_SLOT_MODE_STEREO),
+      .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
       .gpio_cfg =
           {
               .mclk = static_cast<gpio_num_t>(Config::kAudioI2sMckPin),
@@ -48,9 +68,14 @@ bool beginI2s() {
   // RX remains enabled continuously, so it must be the clock master.
   if (i2s_channel_init_std_mode(rxChannel, &stdConfig) != ESP_OK ||
       i2s_channel_init_std_mode(txChannel, &stdConfig) != ESP_OK) {
+    releaseI2sChannels();
     return false;
   }
-  return i2s_channel_enable(rxChannel) == ESP_OK;
+  if (i2s_channel_enable(rxChannel) != ESP_OK) {
+    releaseI2sChannels();
+    return false;
+  }
+  return true;
 }
 
 /** Writes a short sine tone, fading the ends in/out to avoid speaker pops.
@@ -61,16 +86,17 @@ void playTone(uint32_t durationMs) {
     return;
   }
   i2s_channel_enable(txChannel);
-  const uint32_t totalSamples = Config::kAudioSampleRate * durationMs / 1000;
-  const uint32_t fadeSamples = Config::kAudioSampleRate * 5 / 1000;
+  const uint32_t totalSamples = Config::kAudioSampleRate * durationMs / kMillisecondsPerSecond;
+  const uint32_t fadeSamples = Config::kAudioSampleRate * Config::kAudioFadeMs / kMillisecondsPerSecond;
   const float angularStep =
       kTwoPi * Config::kAudioBeepFrequencyHz / static_cast<float>(Config::kAudioSampleRate);
 
   uint32_t sampleIndex = 0;
   while (sampleIndex < totalSamples) {
-    int16_t buffer[128];  // 64 stereo frames per chunk.
+    int16_t buffer[Config::kAudioDmaFrames * kStereoChannelCount];
     const uint32_t remaining = totalSamples - sampleIndex;
-    const uint32_t framesThisChunk = remaining < 64 ? remaining : 64;
+    const uint32_t framesThisChunk =
+        remaining < Config::kAudioDmaFrames ? remaining : Config::kAudioDmaFrames;
 
     for (uint32_t frame = 0; frame < framesThisChunk; ++frame, ++sampleIndex) {
       float envelope = 1.0f;
@@ -79,14 +105,14 @@ void playTone(uint32_t durationMs) {
       } else if (sampleIndex > totalSamples - fadeSamples) {
         envelope = static_cast<float>(totalSamples - sampleIndex) / fadeSamples;
       }
-      const int16_t sample = static_cast<int16_t>(
-          sinf(angularStep * static_cast<float>(sampleIndex)) * 12000.0f * envelope);
-      buffer[frame * 2] = sample;
-      buffer[frame * 2 + 1] = sample;
+      const int16_t sample = static_cast<int16_t>(sinf(angularStep * static_cast<float>(sampleIndex)) *
+                                                  Config::kAudioToneAmplitude * envelope);
+      buffer[frame * kStereoChannelCount] = sample;
+      buffer[frame * kStereoChannelCount + 1] = sample;
     }
 
     size_t bytesWritten = 0;
-    i2s_channel_write(txChannel, buffer, framesThisChunk * 2 * sizeof(int16_t),
+    i2s_channel_write(txChannel, buffer, framesThisChunk * kStereoChannelCount * sizeof(int16_t),
                       &bytesWritten, portMAX_DELAY);
   }
   i2s_channel_disable(txChannel);
@@ -98,38 +124,50 @@ simpleawait::Task<void> service(i2c_master_bus_handle_t touchBus) {
 
   codec = es8311_create(touchBus, Config::kAudioCodecI2cAddress);
   if (codec == nullptr || es8311_init_begin(codec) != ESP_OK) {
+    currentMicrophoneStatus = MicrophoneStatus::kUnavailable;
     Serial.println("WARNING: audio codec reset failed; audio I/O unavailable");
+    es8311_delete(codec);
+    codec = nullptr;
     co_return;
   }
-  co_await simpleawait::delay_ms(20);
+  co_await simpleawait::delay_ms(Config::kAudioCodecResetMs);
   if (es8311_init_finish(codec) != ESP_OK) {
+    currentMicrophoneStatus = MicrophoneStatus::kUnavailable;
     Serial.println("WARNING: audio codec init failed; audio I/O unavailable");
+    es8311_delete(codec);
+    codec = nullptr;
     co_return;
   }
 
-  es8311_voice_volume_set(codec, 70, nullptr);
+  es8311_voice_volume_set(codec, Config::kAudioCodecVolume, nullptr);
   es8311_voice_mute(codec, false);
   microphoneReady = es8311_microphone_config(codec) == ESP_OK;
   feedbackReady = beginI2s();
   microphoneReady = microphoneReady && feedbackReady;
   if (!feedbackReady) {
+    currentMicrophoneStatus = MicrophoneStatus::kUnavailable;
     Serial.println("WARNING: audio I/O init failed; beeps and microphone unavailable");
+    es8311_delete(codec);
+    codec = nullptr;
     co_return;
   }
   if (!microphoneReady) {
+    currentMicrophoneStatus = MicrophoneStatus::kUnavailable;
     Serial.println("WARNING: microphone init failed; music mode uses fallback glow");
+  } else {
+    currentMicrophoneStatus = MicrophoneStatus::kReady;
   }
 
   while (true) {
-    if (requestedToneCount == 0) {
-      co_await simpleawait::delay_ms(5);
+    if (requestedFeedback == FeedbackPattern::kNone) {
+      co_await simpleawait::delay_ms(Config::kAudioServicePollMs);
       continue;
     }
 
-    const uint8_t toneCount = requestedToneCount;
-    requestedToneCount = 0;
+    const FeedbackPattern feedback = requestedFeedback;
+    requestedFeedback = FeedbackPattern::kNone;
     playTone(Config::kAudioBeepDurationMs);
-    if (toneCount > 1) {
+    if (feedback == FeedbackPattern::kDouble) {
       co_await simpleawait::delay_ms(Config::kAudioBeepGapMs);
       playTone(Config::kAudioBeepDurationMs);
     }
@@ -139,25 +177,26 @@ simpleawait::Task<void> service(i2c_master_bus_handle_t touchBus) {
 }  // namespace
 
 bool start(i2c_master_bus_handle_t touchBus) {
-  return simpleawait::create_task(service(touchBus)).valid();
+  const bool started = simpleawait::create_task(service(touchBus)).valid();
+  if (!started) {
+    currentMicrophoneStatus = MicrophoneStatus::kUnavailable;
+  }
+  return started;
 }
 
-bool microphoneAvailable() {
-  return microphoneReady;
-}
+MicrophoneStatus microphoneStatus() { return currentMicrophoneStatus; }
 
 bool readMicrophoneLevel(uint16_t& magnitude) {
   if (!microphoneReady || rxChannel == nullptr) {
     return false;
   }
 
-  int16_t samples[128];
+  int16_t samples[Config::kAudioDmaFrames * kStereoChannelCount];
   uint64_t total = 0;
   size_t totalSamples = 0;
   while (true) {
     size_t bytesRead = 0;
-    const esp_err_t result =
-        i2s_channel_read(rxChannel, samples, sizeof(samples), &bytesRead, 0);
+    const esp_err_t result = i2s_channel_read(rxChannel, samples, sizeof(samples), &bytesRead, 0);
     if (result == ESP_ERR_TIMEOUT || bytesRead == 0) {
       break;
     }
@@ -179,14 +218,14 @@ bool readMicrophoneLevel(uint16_t& magnitude) {
 }
 
 void beep() {
-  if (feedbackReady) {
-    requestedToneCount = requestedToneCount < 1 ? 1 : requestedToneCount;
+  if (feedbackReady && requestedFeedback == FeedbackPattern::kNone) {
+    requestedFeedback = FeedbackPattern::kSingle;
   }
 }
 
 void beepLong() {
   if (feedbackReady) {
-    requestedToneCount = 2;
+    requestedFeedback = FeedbackPattern::kDouble;
   }
 }
 

@@ -5,8 +5,8 @@
 #include "ColorMath.h"
 
 constexpr uint32_t packColor(const RgbColor& color) {
-  return (static_cast<uint32_t>(color.red) << 16) |
-         (static_cast<uint32_t>(color.green) << 8) | color.blue;
+  // Preferences stores a stable 0x00RRGGBB value independent of struct layout.
+  return (static_cast<uint32_t>(color.red) << 16) | (static_cast<uint32_t>(color.green) << 8) | color.blue;
 }
 
 constexpr RgbColor unpackColor(uint32_t packed) {
@@ -17,6 +17,7 @@ constexpr RgbColor unpackColor(uint32_t packed) {
   };
 }
 
+/** Tracks one manually selected color until it remains stable for the save delay. */
 class ManualColorSaveTracker {
  public:
   void noteChange(const RgbColor& color, uint32_t now) {
@@ -25,25 +26,15 @@ class ManualColorSaveTracker {
     pending_ = true;
   }
 
-  void cancel() {
-    pending_ = false;
-  }
+  void cancel() { pending_ = false; }
 
-  bool ready(uint32_t now, uint32_t delayMs) const {
-    return pending_ && now - changedAt_ >= delayMs;
-  }
+  bool ready(uint32_t now, uint32_t delayMs) const { return pending_ && now - changedAt_ >= delayMs; }
 
-  void markSaved() {
-    pending_ = false;
-  }
+  void markSaved() { pending_ = false; }
 
-  bool pending() const {
-    return pending_;
-  }
+  bool pending() const { return pending_; }
 
-  const RgbColor& color() const {
-    return color_;
-  }
+  const RgbColor& color() const { return color_; }
 
  private:
   RgbColor color_ = {0, 0, 0};

@@ -3,8 +3,8 @@
 Touch-driven color and brightness control for the Elecrow 3.5-inch ESP32-S3
 320x480 capacitive display (DLE06235B).
 
-The firmware drives the board's onboard NeoPixel and, optionally, an external
-NeoPixel array wired to P2 at the same time with the same color and brightness.
+The firmware drives the board's onboard WS2812-compatible addressable LED and,
+optionally, an external array wired to P2 with the same color and brightness.
 
 Ultimate goal is for this to be a wall panel control for led strip lights
 
@@ -36,14 +36,14 @@ the active mode until a reboot; startup always restores in solid mode.
 
 | Function                                  | ESP32-S3 pin |
 | ----------------------------------------- | -----------: |
-| Onboard NeoPixel data                     |      GPIO 40 |
+| Onboard addressable LED data              |      GPIO 40 |
 | LCD QSPI                                  |    GPIO 9-14 |
 | LCD backlight                             |      GPIO 41 |
 | Touch SDA/SCL                             |   GPIO 38/39 |
 | Touch reset/interrupt                     |   GPIO 48/47 |
 | ES8311 microphone I2S data                |      GPIO 16 |
 | ES8311 speaker I2S data                   |      GPIO 15 |
-| P2 output used for external NeoPixel data |      GPIO 45 |
+| P2 output used for external LED data      |      GPIO 45 |
 | P2 alternate GPIO signal                  |      GPIO 46 |
 
 GPIO45 and GPIO46 are both normal input/output-capable GPIOs after reset.
@@ -59,7 +59,7 @@ power-on and hardware reset:
 
 After reset has completed, both GPIO45 and GPIO46 are available as normal GPIOs.
 
-GPIO45 is used here for the external NeoPixel output. External circuitry should
+GPIO45 is used here for the external addressable LED output. External circuitry should
 still avoid strongly driving either strapping pin during reset. A logic-level
 shifter connected to GPIO45 should present a high-impedance input to the ESP32-S3
 and should not back-drive the pin while the ESP32-S3 is unpowered.
@@ -69,7 +69,7 @@ and should not back-drive the pin while the ESP32-S3 is unpowered.
 - Arduino IDE 2.x or Arduino CLI
 - Espressif ESP32 Arduino core 3.3.x
 - The following libraries from `libraries`:
-  - `Adafruit_NeoPixel`
+  - Repository-owned `AddressableLedStrip` transport using the ESP32 RMT peripheral
   - `ST77922`
   - `ST77922_TOUCH`
   - `TFT_eSPI`
@@ -128,7 +128,7 @@ or incomplete build before reusing the cache. It requires the Python `esptool` p
 build for an external array, pass its pixel count, for example
 `.\tools\build-firmware.ps1 -ExternalPixelCount 60`.
 
-This builds with the external array disabled (onboard NeoPixel only). To also
+This builds with the external array disabled (onboard addressable LED only). To also
 drive an external array on P2, add:
 
 ```text
@@ -136,7 +136,7 @@ drive an external array on P2, add:
 ```
 
 Replace `60` with the array's pixel count. See
-[Driving an external NeoPixel array on P2](#driving-an-external-neopixel-array-on-p2)
+[Driving an external addressable LED array on P2](#driving-an-external-addressable-led-array-on-p2)
 below.
 
 To build and flash in one step over COM8:
@@ -223,9 +223,9 @@ brightness mapping, preset tap/hold/cancel behavior, mode transitions, rainbow
 and breathing math, microphone-envelope smoothing, persistence timing and
 cancellation, packed-color storage, and timer rollover.
 
-## Driving an external NeoPixel array on P2
+## Driving an external addressable LED array on P2
 
-The onboard NeoPixel on GPIO40 is always driven. To also drive an external
+The onboard addressable LED on GPIO40 is always driven. To also drive an external
 array wired to P2 using GPIO45, build with the array's pixel count:
 
 ```powershell
@@ -243,12 +243,12 @@ That command writes the artifacts to:
 
 Change both the pixel-count define and output folder name when building for a
 different array size. Omitting the define, or setting it to `0`, disables the
-external array and drives only the onboard NeoPixel.
+external array and drives only the onboard addressable LED.
 
 Do not power an external array from a GPIO. Use a properly sized 5 V supply and
 connect the supply ground to the ESP32-S3 ground.
 
-For reliable NeoPixel operation, a typical installation uses:
+For reliable WS2812-compatible LED operation, a typical installation uses:
 
 - A 3.3 V-to-5 V logic-level shifter with a high-impedance input
 - A 330-500 ohm series resistor near the first pixel
@@ -256,7 +256,7 @@ For reliable NeoPixel operation, a typical installation uses:
 - A common ground between the array supply and the ESP32-S3
 
 Budget up to approximately 60 mA per RGB pixel as a conservative full-white
-worst-case estimate. Actual consumption depends on the NeoPixel type,
+worst-case estimate. Actual consumption depends on the addressable LED type,
 brightness setting, and displayed color.
 
 Because GPIO45 is a strapping pin, the external circuit should not drive or
@@ -287,7 +287,7 @@ After flashing:
    wheel to verify the documented mode transitions.
 10. Drag out of a pressed preset before release and verify it is not recalled or
    overwritten.
-11. With the external NeoPixel array connected, power-cycle and reset the board
+11. With the external addressable LED array connected, power-cycle and reset the board
    several times and confirm reliable booting.
 12. Select a solid color, wait at least two minutes without changing it, reboot,
     and confirm it is restored.
@@ -295,9 +295,10 @@ After flashing:
     reboot, and confirm the effect-generated color was not stored.
 
 Microphone sensitivity and the perceived breathing speed require final tuning
-on the physical board. If microphone initialization fails, Serial reports a
-warning, P6 shows a red status dot, and music mode continues as a dim fallback
-color cycle without affecting the other controls.
+on the physical board. P6 does not show a status indicator while its microphone
+is initializing. If initialization definitively fails, Serial reports a warning
+and P6 shows a red fault dot; the dot never indicates recording. Music mode
+continues as a dim fallback color cycle without affecting the other controls.
 
 ## Design notes
 
@@ -326,16 +327,21 @@ shown during cold-start NVS and color-wheel setup.
 | Component               | Responsibility                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `ControllerModel`       | Owns the selected color, brightness, power state, active output mode, and four presets.                                   |
+| `InteractionController` | Routes touch gestures into model, lighting, persistence, audio, and UI actions.                                           |
+| `AddressableLedStrip`   | Owns the minimal WS2812-compatible GRB encoder, frame buffer, and ESP32 RMT transport.                                  |
+| `LightingOutput`        | Owns addressable LED outputs, reactive effect state, microphone envelope, and live preview color.                       |
+| `UiRenderer`            | Owns framebuffer rendering, wheel-marker repair, transient saved feedback, and panel transfers.                          |
+| `UiLayout`              | Defines named screen geometry, hit regions, glyph dimensions, and RGB565 theme values.                                   |
+| `ColorPersistenceService` | Coordinates delayed selected-color writes, queued preset writes, and retry timing.                                     |
 | `PersistentState`       | Restores and deduplicates Preferences/NVS writes for presets and the stable selected color.                               |
 | `ManualColorSaveTracker` | Tracks manual color changes, cancellation, rollover-safe elapsed time, and save readiness.                                |
 | `SimpleAwait`           | Runs fixed-memory cooperative tasks for touch, effects, UI refresh, audio sequencing, and persistence.                   |
 | `PresetGesture`         | Distinguishes a preset tap from a 700 ms hold and guarantees that a stored preset is not also recalled on release.       |
-| `RgbColor` / `HsvColor` | Small color value types shared by the model, renderer, tests, and NeoPixel adapter.                                      |
+| `RgbColor` / `HsvColor` | Small color value types shared by the model, renderer, tests, and addressable LED adapter.                              |
 | `ColorMath` functions   | Convert RGB/HSV values, map wheel coordinates to color, and map slider coordinates to brightness.                        |
 | `ReactiveLighting`      | Provides host-tested rainbow, breathing, music-color, brightness-scaling, and adaptive audio-envelope math.              |
 | `AudioFeedback`         | Asynchronously initializes duplex ES8311 audio, queues touch beeps, and reads non-blocking microphone amplitude samples. |
-| `TouchState`            | Records which control captured the active touch plus its latest coordinates until release debounce completes.            |
-| `ColorController.ino`   | Composes the hardware drivers, model, renderer, touch routing, and Arduino `setup()`/`loop()` lifecycle.                 |
+| `ColorController.ino`   | Composes services, initializes hardware, starts SimpleAwait tasks, and provides the poll-only Arduino loop.               |
 
 The code comments use Doxygen-style summaries for reusable types and public
 methods. Straightforward drawing calls are left uncluttered; comments focus on

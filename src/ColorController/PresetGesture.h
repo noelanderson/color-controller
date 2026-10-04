@@ -21,14 +21,13 @@ class PresetGesture {
   /** Starts tracking a new preset press at the supplied millis() value. */
   void begin(uint32_t now) {
     startedAt_ = now;
-    active_ = true;
-    stored_ = false;
+    state_ = State::kPressed;
   }
 
   /** Emits kStore once when an in-bounds press reaches the hold threshold. */
   PresetGestureEvent update(uint32_t now, bool inside, uint32_t holdMs) {
-    if (active_ && !stored_ && inside && now - startedAt_ >= holdMs) {
-      stored_ = true;
+    if (state_ == State::kPressed && inside && now - startedAt_ >= holdMs) {
+      state_ = State::kStored;
       return PresetGestureEvent::kStore;
     }
     return PresetGestureEvent::kNone;
@@ -37,20 +36,21 @@ class PresetGesture {
   /** Finishes the gesture and emits kRecall only for an unconsumed in-bounds tap. */
   PresetGestureEvent release(bool inside) {
     const PresetGestureEvent event =
-        active_ && !stored_ && inside ? PresetGestureEvent::kRecall
-                                     : PresetGestureEvent::kNone;
+        state_ == State::kPressed && inside ? PresetGestureEvent::kRecall : PresetGestureEvent::kNone;
     reset();
     return event;
   }
 
   /** Cancels all state without emitting an event. */
-  void reset() {
-    active_ = false;
-    stored_ = false;
-  }
+  void reset() { state_ = State::kIdle; }
 
  private:
+  enum class State : uint8_t {
+    kIdle,
+    kPressed,
+    kStored,
+  };
+
   uint32_t startedAt_ = 0;
-  bool active_ = false;
-  bool stored_ = false;
+  State state_ = State::kIdle;
 };

@@ -4,6 +4,11 @@
 
 #include "ControllerModel.h"
 
+/**
+ * Stores presets and the stable manual color in the ESP32 Preferences/NVS partition.
+ *
+ * Cached packed values suppress writes that would needlessly consume flash endurance.
+ */
 class PersistentState {
  public:
   bool begin(ControllerModel& model);

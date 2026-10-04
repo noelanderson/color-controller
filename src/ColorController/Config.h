@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-// Override at build time to size the external P2 NeoPixel array; 0 disables it.
+// Override at build time to size the external P2 addressable LED array; 0 disables it.
 #ifndef COLOR_CONTROLLER_EXTERNAL_PIXEL_COUNT
 #define COLOR_CONTROLLER_EXTERNAL_PIXEL_COUNT 0
 #endif
@@ -10,6 +10,8 @@
 namespace Config {
 
 // Hardware and interaction settings shared by the sketch and model classes.
+constexpr uint32_t kSerialBaud = 115200;
+constexpr uint32_t kFatalReportMs = 1000;
 constexpr uint8_t kOnboardPixelPin = 40;
 constexpr uint16_t kOnboardPixelCount = 1;
 constexpr uint8_t kExternalPixelPin = 45;
@@ -32,6 +34,12 @@ constexpr uint32_t kAudioSampleRate = 16000;
 constexpr uint16_t kAudioBeepFrequencyHz = 1800;
 constexpr uint32_t kAudioBeepDurationMs = 70;
 constexpr uint32_t kAudioBeepGapMs = 50;
+constexpr uint32_t kAudioCodecResetMs = 20;
+constexpr uint32_t kAudioServicePollMs = 5;
+constexpr uint16_t kAudioDmaFrames = 64;
+constexpr uint32_t kAudioFadeMs = 5;
+constexpr int16_t kAudioToneAmplitude = 12000;
+constexpr int kAudioCodecVolume = 70;
 constexpr uint32_t kTouchPollMs = 5;
 constexpr uint32_t kEffectFrameMs = 25;
 constexpr uint32_t kEffectUiFrameMs = 200;

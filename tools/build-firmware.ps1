@@ -48,6 +48,15 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $toolPath = Join-Path $repoRoot "tools"
+$board = "esp32:esp32:esp32s3"
+$boardOptions = @(
+    "FlashSize=16M"
+    "PartitionScheme=app3M_fat9M_16MB"
+    "PSRAM=opi"
+    "USBMode=hwcdc"
+    "CDCOnBoot=cdc"
+) -join ","
+$fqbn = "${board}:${boardOptions}"
 $outputDirectory = if ($ExternalPixelCount -gt 0) {
     Join-Path $repoRoot "build\onboard-plus-p2-$ExternalPixelCount-pixels"
 } else {
@@ -59,7 +68,7 @@ $successMarker = Join-Path $buildDirectory ".build-succeeded"
 $arguments = @(
     "compile"
     "--fqbn"
-    "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc"
+    $fqbn
     "--libraries"
     (Join-Path $repoRoot "libraries")
     "--output-dir"
@@ -131,7 +140,9 @@ try {
             -not (Test-Path -LiteralPath $_ -PathType Leaf)
         }
         if ($missingImages) {
-            throw "Required firmware image not found: $($missingImages -join ', '). Build first without -UploadOnly."
+            $missingList = $missingImages -join ", "
+            throw ("Required firmware image not found: $missingList. " +
+                "Build first without -UploadOnly.")
         }
         & python -m esptool `
             --chip esp32s3 `

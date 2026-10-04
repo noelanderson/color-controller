@@ -14,6 +14,7 @@ constexpr char kPresetKeys[ControllerModel::kPresetCount][3] = {
 };
 
 bool isPackedColor(uint32_t packed) {
+  // Valid colors occupy only 24 bits; the all-ones sentinel therefore cannot collide.
   return (packed & 0xFF000000) == 0;
 }
 
@@ -26,8 +27,7 @@ bool PersistentState::begin(ControllerModel& model) {
   }
 
   for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
-    const uint32_t packed =
-        preferences_.getUInt(kPresetKeys[index], kMissingColor);
+    const uint32_t packed = preferences_.getUInt(kPresetKeys[index], kMissingColor);
     if (isPackedColor(packed)) {
       model.setPreset(index, unpackColor(packed));
       savedPresets_[index] = packed;
@@ -36,8 +36,7 @@ bool PersistentState::begin(ControllerModel& model) {
     }
   }
 
-  const uint32_t packedSelected =
-      preferences_.getUInt(kSelectedColorKey, kMissingColor);
+  const uint32_t packedSelected = preferences_.getUInt(kSelectedColorKey, kMissingColor);
   if (isPackedColor(packedSelected)) {
     model.select(unpackColor(packedSelected));
     savedSelectedColor_ = packedSelected;

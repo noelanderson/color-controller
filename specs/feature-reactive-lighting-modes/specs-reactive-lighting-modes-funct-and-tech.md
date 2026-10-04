@@ -45,6 +45,8 @@ all output without discarding the active mode.
 - [x] Effects remain responsive to touch and do not block the main loop.
 - [x] A microphone or codec initialization failure leaves the rest of the
   controller operational and reports the failure over Serial.
+- [x] P6 hides its red microphone-fault dot during asynchronous initialization,
+  then redraws automatically if initialization definitively fails.
 
 ### User Scenarios
 
@@ -93,7 +95,7 @@ writes. Existing touch and display drivers remain unchanged.
 
 - **Internal:** `ColorMath`, `ControllerModel`, `AudioFeedback`, and the
   SimpleAwait task scheduler.
-- **External:** Existing ESP32 Arduino I2S driver and included NeoPixel/display
+- **External:** Existing ESP32 Arduino I2S driver and included addressable LED/display
   libraries. No new library is required.
 - **Reference:** Freenove `Sketch_07.2_Echo` confirms GPIO 16 as I2S input and
   the ES8311 analog microphone configuration (`ADC_REG17=0xC8`,
@@ -103,7 +105,7 @@ writes. Existing touch and display drivers remain unchanged.
 
 - [x] Use `millis()`-based effect timing and unsigned rollover-safe arithmetic.
 - [x] Limit effect output updates to a fixed interval to avoid needless
-  NeoPixel writes and preserve touch responsiveness.
+  addressable LED writes and preserve touch responsiveness.
 - [x] Read microphone samples with a zero-timeout/non-blocking I2S call.
 - [x] Adapt to ambient noise with a slowly moving noise floor and a faster
   attack/slower release envelope.
@@ -123,7 +125,9 @@ writes. Existing touch and display drivers remain unchanged.
   and apply attack/release smoothing. Use the result to scale the user's
   brightness and advance a saturated color.
 - **UI:** P5 uses a compact rainbow gradient and text; P6 uses drawing
-  primitives for a note icon so no Unicode font dependency is introduced.
+  primitives for a note icon so no Unicode font dependency is introduced. The
+  red P6 status dot means microphone initialization failed; it is not a
+  recording indicator and remains hidden while initialization is in progress.
 - **Risks:** Microphone levels vary between boards and enclosures; codec
   full-duplex behavior and visual sensitivity require on-device tuning.
 - **Alternatives considered:** Hand-written loop timers were initially used but
@@ -144,7 +148,7 @@ writes. Existing touch and display drivers remain unchanged.
 - P5 is no longer an editable preset and becomes rainbow mode.
 - P6 is no longer an editable preset and becomes music mode.
 - Music mode must use the onboard microphone.
-- The feature must work for the onboard NeoPixel and optional external array.
+- The feature must work for the onboard addressable LED and optional external array.
 - Documentation and the existing feature specification must be updated.
 - An alternative model must review the finished change.
 
@@ -191,7 +195,7 @@ writes. Existing touch and display drivers remain unchanged.
 
 ### Stage 3: Rainbow Mode and UI
 
-- [COMPLETED] Step 3.1 - Refactor NeoPixel output so solid and animated frames share a
+- [COMPLETED] Step 3.1 - Refactor addressable LED output so solid and animated frames share a
   safe brightness/power write path.
 - [COMPLETED] Step 3.2 - Schedule rainbow frames with per-pixel hue offsets and a slow
   breathing envelope.

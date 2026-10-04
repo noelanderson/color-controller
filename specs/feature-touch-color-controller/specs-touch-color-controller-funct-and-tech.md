@@ -10,7 +10,7 @@
 
 ### Problem Statement
 
-The Elecrow 3.5-inch ESP32-S3 display needs a self-contained touch interface for choosing a NeoPixel color and brightness without a phone, network connection, or serial console. The first release must control the board's single onboard RGB LED while establishing a clean path to an external NeoPixel array on connector P2.
+The Elecrow 3.5-inch ESP32-S3 display needs a self-contained touch interface for choosing an addressable LED color and brightness without a phone, network connection, or serial console. The first release must control the board's single onboard RGB LED while establishing a clean path to an external WS2812-compatible array on connector P2.
 
 ### Proposed Solution
 
@@ -25,7 +25,7 @@ Run the display in 480x320 landscape orientation and present one control surface
   current color in that slot. P5 starts a breathing rainbow and P6 starts
   onboard-microphone-reactive lighting.
 
-The UI state is independent of the LED transport. Version 1 uses the onboard NeoPixel on GPIO 40. A later build can switch the output configuration to a strip on P2 without changing touch or display behavior.
+The UI state is independent of the LED transport. Version 1 uses the onboard addressable LED on GPIO 40. A later build can switch the output configuration to a strip on P2 without changing touch or display behavior.
 
 ### Functional Requirements
 
@@ -40,16 +40,16 @@ The UI state is independent of the LED transport. Version 1 uses the onboard Neo
 - [x] Rainbow and music colors are never stored as the selected startup color.
 - [x] P5 activates a full-spectrum rainbow with a slow breathing envelope.
 - [x] P6 shows a musical-note icon and pulses color/brightness from onboard mic input.
-- [x] The power control turns NeoPixel output off and restores the selected color when turned back on.
+- [x] The power control turns addressable LED output off and restores the selected color when turned back on.
 - [x] The brightness slider adjusts output from 0 through 255.
-- [x] Version 1 controls the onboard NeoPixel on GPIO 40.
+- [x] Version 1 controls the onboard addressable LED on GPIO 40.
 - [x] Output configuration supports a later external array on P2 GPIO 45 by changing compile-time settings.
 - [x] Interactions remain non-blocking; long-press detection must not use `delay`.
 
 ### User Scenarios
 
-1. **Choose a new color:** The user drags around the wheel, sees the top preview update, and sees the onboard NeoPixel follow the selected color.
-2. **Recall a preset:** The user taps a colored preset button and the preview and NeoPixel change to that stored color.
+1. **Choose a new color:** The user drags around the wheel, sees the top preview update, and sees the onboard addressable LED follow the selected color.
+2. **Recall a preset:** The user taps a colored preset button and the preview and addressable LED change to that stored color.
 3. **Replace a preset:** The user chooses a wheel color, holds P1-P4 for at least 700 ms, receives visible saved feedback, and later recalls the new color with a tap.
 4. **Run an ambient effect:** The user taps P5 and sees a moving, breathing rainbow.
 5. **React to music:** The user taps P6 and sees output brightness pulse from onboard microphone input.
@@ -75,23 +75,26 @@ The UI state is independent of the LED transport. Version 1 uses the onboard Neo
 
 ### Architecture Impact
 
-This is a new Arduino sketch with four responsibilities:
+The firmware has the following responsibilities:
 
-1. `ColorController.ino` initializes hardware and composes the cooperative tasks.
+1. `ColorController.ino` is the composition root for hardware initialization and cooperative tasks.
 2. `ControllerModel` owns color, brightness, power, presets, and the active output mode.
-3. `ColorMath` and `ReactiveLighting` provide host-tested geometry, color, animation, and audio-envelope calculations.
-4. `AudioFeedback` runs ES8311 speaker output and onboard microphone input over duplex I2S.
-5. `PersistentState` stores deduplicated RGB values in ESP32 Preferences/NVS.
-6. SimpleAwait C++20 tasks own touch, effects, effect UI, audio, and persistence.
-7. The ST77922 display/touch drivers are consumed from the supplied vendor resource pack.
+3. `InteractionController` owns touch routing and coordinates user-driven state changes.
+4. `UiRenderer` and `UiLayout` own framebuffer rendering, panel transfers, and named geometry.
+5. `LightingOutput` owns addressable LED outputs, reactive state, and the live effect preview.
+6. `ColorPersistenceService` coordinates delayed and queued writes through `PersistentState`.
+7. `ColorMath` and `ReactiveLighting` provide host-tested color, animation, and envelope calculations.
+8. `AudioFeedback` runs ES8311 speaker output and onboard microphone input over duplex I2S.
+9. SimpleAwait C++20 tasks schedule touch, effects, effect UI, audio, and persistence.
+10. The ST77922 display/touch drivers are consumed from the supplied vendor resource pack.
 
-`Adafruit_NeoPixel` is the LED transport. `TFT_eSPI` supplies a PSRAM-backed software sprite used as the RGB565 framebuffer; the vendor ST77922 driver transfers that framebuffer to the QSPI display.
+The repository-owned `AddressableLedStrip` class provides the minimal WS2812-compatible GRB encoder and ESP32 RMT transport. `TFT_eSPI` supplies a PSRAM-backed software sprite used as the RGB565 framebuffer; the vendor ST77922 driver transfers that framebuffer to the QSPI display.
 
 ### Dependencies
 
 - **Internal:** Supplied `ST77922` and `ST77922_Touch` board drivers in the resource pack.
-- **External:** ESP32 Arduino core 3.3.x, TFT_eSPI 2.5.x, Adafruit NeoPixel 1.12 or newer, and SimpleAwait 1.0.1.
-- **Hardware:** Elecrow DLE06235B, onboard NeoPixel on GPIO 40, ES8311 analog
+- **External:** ESP32 Arduino core 3.3.x, TFT_eSPI 2.5.x, and SimpleAwait 1.0.1.
+- **Hardware:** Elecrow DLE06235B, onboard addressable LED on GPIO 40, ES8311 analog
   microphone input on I2S GPIO 16, and optional external signal on P2 GPIO 45.
 
 ### Technical Requirements
@@ -104,7 +107,7 @@ This is a new Arduino sketch with four responsibilities:
   delay calls.
 - [x] Clamp all touch coordinates and computed values to valid ranges.
 - [x] Separate state transitions and color math from hardware writes where practical.
-- [x] Avoid writing the NeoPixel or display when state has not changed.
+- [x] Avoid writing the addressable LED or display when state has not changed.
 - [x] Schedule effects without blocking and avoid per-frame display refreshes.
 - [x] Read microphone blocks with zero-timeout I2S calls and smooth the level
   with an adaptive noise floor and attack/release envelope.
@@ -137,14 +140,14 @@ This is a new Arduino sketch with four responsibilities:
 
 - Hardware is the Elecrow 3.5-inch ESP32-S3 display, 320x480 IPS capacitive touch variant.
 - The supplied resource pack is the primary source for board-specific drivers and pin assignments.
-- Version 1 targets the onboard NeoPixel.
-- Version 2 will target an external NeoPixel array connected to P2.
+- Version 1 targets the onboard addressable LED.
+- Version 2 will target an external addressable LED array connected to P2.
 - Required UI includes the top color strip, left color wheel, four presets,
   rainbow/music controls, power, and brightness.
 
 ### Implementation Guidance
 
-- The vendor examples identify ST77922 QSPI display pins, touch I2C pins, onboard NeoPixel GPIO 40, and landscape rotation behavior.
+- The vendor examples identify ST77922 QSPI display pins, touch I2C pins, onboard addressable LED GPIO 40, and landscape rotation behavior.
 - P2 exposes GPIO 45 and GPIO 46, but ESP32-S3 GPIO 46 is input-only. The output configuration defaults to GPIO 40 and one pixel, with documented constants for migration to GPIO 45.
 - Use fixed-memory SimpleAwait tasks for all runtime scheduling; keep Arduino
   `loop()` limited to polling the scheduler.
@@ -172,7 +175,7 @@ This is a new Arduino sketch with four responsibilities:
 
 ### Stage 1: Research and Technical Design
 
-- [COMPLETED] Step 1.1 - Inspect the vendor display, touch, NeoPixel, and backlight examples and record the authoritative pin assignments.
+- [COMPLETED] Step 1.1 - Inspect the vendor display, touch, addressable LED, and backlight examples and record the authoritative pin assignments.
 - [COMPLETED] Step 1.2 - Confirm the installed Arduino toolchain and the ESP32-S3 board target.
 - [COMPLETED] Step 1.3 - Define the 480x320 layout, touch gesture rules, state model, output abstraction, and v2 boundary.
 
@@ -180,7 +183,7 @@ This is a new Arduino sketch with four responsibilities:
 
 - [COMPLETED] Step 2.1 - Create the Arduino sketch and connect it to the supplied board-specific drivers.
 - [COMPLETED] Step 2.2 - Implement pure color conversion, wheel geometry, and controller state transitions.
-- [COMPLETED] Step 2.3 - Initialize the display, touch controller, PSRAM framebuffer, and onboard NeoPixel with explicit failure handling.
+- [COMPLETED] Step 2.3 - Initialize the display, touch controller, PSRAM framebuffer, and onboard addressable LED with explicit failure handling.
 
 ### Stage 3: Touch User Interface
 
@@ -190,7 +193,7 @@ This is a new Arduino sketch with four responsibilities:
 
 ### Stage 4: Output and V2 Readiness
 
-- [COMPLETED] Step 4.1 - Apply selected color, brightness, and power state to the onboard NeoPixel only when output state changes.
+- [COMPLETED] Step 4.1 - Apply selected color, brightness, and power state to the onboard addressable LED only when output state changes.
 - [COMPLETED] Step 4.2 - Expose documented compile-time output pin and pixel-count constants for a future P2 array.
 - [COMPLETED] Step 4.3 - Document external-array electrical constraints and GPIO 45 as the P2 output choice for v2.
 
@@ -249,7 +252,7 @@ This is a new Arduino sketch with four responsibilities:
 
 ### Notes for Future Work
 
-- External NeoPixel arrays should not be powered from a GPIO. Size the 5 V supply for worst-case current, connect grounds, and consider a 3.3 V-to-5 V level shifter and series data resistor.
+- External addressable LED arrays should not be powered from a GPIO. Size the 5 V supply for worst-case current, connect grounds, and consider a 3.3 V-to-5 V level shifter and series data resistor.
 - GPIO 45 is a strapping pin, so v2 wiring must not force its level during reset.
 - Physical touch alignment, perceived refresh responsiveness, and RGB channel order still require validation on the target board.
 - Microphone level, noise-floor adaptation, and breathing cadence require

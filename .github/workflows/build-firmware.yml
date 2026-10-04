@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ESP32_INDEX_URL: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+      ESP32_BOARD: esp32:esp32:esp32s3
 
     steps:
       - name: Check out repository
@@ -32,8 +33,10 @@ jobs:
       - name: Compile firmware
         run: |
           mkdir -p build/ci
+          board_options="FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,"
+          board_options="${board_options}PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc"
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc" \
+            --fqbn "${ESP32_BOARD}:${board_options}" \
             --libraries "./libraries" \
             --output-dir "./build/ci" \
             "./src/ColorController"

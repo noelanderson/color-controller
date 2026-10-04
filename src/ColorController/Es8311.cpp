@@ -4,6 +4,13 @@
 
 namespace {
 
+constexpr uint32_t kI2cTimeoutMs = 1000;
+constexpr uint32_t kI2cClockHz = 100000;
+constexpr int kMinimumVolume = 0;
+constexpr int kMaximumVolume = 100;
+constexpr int kVolumeRegisterRange = 256;
+constexpr uint8_t kMuteMask = (1 << 6) | (1 << 5);
+
 struct Es8311Dev {
   i2c_master_dev_handle_t handle;
 };
@@ -11,12 +18,12 @@ struct Es8311Dev {
 esp_err_t writeReg(es8311_handle_t dev, uint8_t reg, uint8_t value) {
   auto* es = static_cast<Es8311Dev*>(dev);
   const uint8_t buffer[2] = {reg, value};
-  return i2c_master_transmit(es->handle, buffer, sizeof(buffer), 1000);
+  return i2c_master_transmit(es->handle, buffer, sizeof(buffer), kI2cTimeoutMs);
 }
 
 esp_err_t readReg(es8311_handle_t dev, uint8_t reg, uint8_t* value) {
   auto* es = static_cast<Es8311Dev*>(dev);
-  return i2c_master_transmit_receive(es->handle, &reg, 1, value, 1, 1000);
+  return i2c_master_transmit_receive(es->handle, &reg, 1, value, 1, kI2cTimeoutMs);
 }
 
 // Fixed operating point: 16 kHz sample rate, 384x MCLK (6.144 MHz). Register
@@ -96,7 +103,7 @@ es8311_handle_t es8311_create(i2c_master_bus_handle_t bus, uint8_t device_addres
   const i2c_device_config_t devConfig = {
       .dev_addr_length = I2C_ADDR_BIT_LEN_7,
       .device_address = device_address,
-      .scl_speed_hz = 100000,
+      .scl_speed_hz = kI2cClockHz,
   };
   if (i2c_master_bus_add_device(bus, &devConfig, &es->handle) != ESP_OK) {
     delete es;
@@ -106,12 +113,15 @@ es8311_handle_t es8311_create(i2c_master_bus_handle_t bus, uint8_t device_addres
 }
 
 void es8311_delete(es8311_handle_t dev) {
-  delete static_cast<Es8311Dev*>(dev);
+  if (dev == nullptr) {
+    return;
+  }
+  auto* es = static_cast<Es8311Dev*>(dev);
+  i2c_master_bus_rm_device(es->handle);
+  delete es;
 }
 
-esp_err_t es8311_init_begin(es8311_handle_t dev) {
-  return writeReg(dev, ES8311_RESET_REG00, 0x1F);
-}
+esp_err_t es8311_init_begin(es8311_handle_t dev) { return writeReg(dev, ES8311_RESET_REG00, 0x1F); }
 
 esp_err_t es8311_init_finish(es8311_handle_t dev) {
   if (writeReg(dev, ES8311_RESET_REG00, 0x00) != ESP_OK) {
@@ -154,12 +164,12 @@ esp_err_t es8311_microphone_config(es8311_handle_t dev) {
 }
 
 esp_err_t es8311_voice_volume_set(es8311_handle_t dev, int volume, int* volume_set) {
-  if (volume < 0) {
-    volume = 0;
-  } else if (volume > 100) {
-    volume = 100;
+  if (volume < kMinimumVolume) {
+    volume = kMinimumVolume;
+  } else if (volume > kMaximumVolume) {
+    volume = kMaximumVolume;
   }
-  const int reg32 = volume == 0 ? 0 : ((volume * 256 / 100) - 1);
+  const int reg32 = volume == 0 ? 0 : ((volume * kVolumeRegisterRange / kMaximumVolume) - 1);
   if (volume_set != nullptr) {
     *volume_set = volume;
   }
@@ -172,9 +182,9 @@ esp_err_t es8311_voice_mute(es8311_handle_t dev, bool mute) {
     return ESP_FAIL;
   }
   if (mute) {
-    reg31 |= (1 << 6) | (1 << 5);
+    reg31 |= kMuteMask;
   } else {
-    reg31 &= ~((1 << 6) | (1 << 5));
+    reg31 &= ~kMuteMask;
   }
   return writeReg(dev, ES8311_DAC_REG31, reg31);
 }
