@@ -22,7 +22,7 @@ void LightingOutput::begin() {
 void LightingOutput::writeSolidPixels(AddressableLedStrip& pixels, const RgbColor& color,
                                       uint8_t brightness) {
   for (uint16_t index = 0; index < pixels.size(); ++index) {
-    pixels.setPixel(index, color, brightness);
+    pixels.setPixel(index, color.red, color.green, color.blue, brightness);
   }
   pixels.show();
 }
@@ -30,7 +30,7 @@ void LightingOutput::writeSolidPixels(AddressableLedStrip& pixels, const RgbColo
 void LightingOutput::writeRainbowPixels(AddressableLedStrip& pixels, uint32_t now, uint8_t brightness) {
   for (uint16_t index = 0; index < pixels.size(); ++index) {
     const RgbColor color = rainbowColor(now, Config::kRainbowCycleMs, index, pixels.size());
-    pixels.setPixel(index, color, brightness);
+    pixels.setPixel(index, color.red, color.green, color.blue, brightness);
   }
   pixels.show();
 }

@@ -1,5 +1,7 @@
 #include "Es8311.h"
 
+#include <new>
+
 #include "Es8311Reg.h"
 
 namespace {
@@ -16,12 +18,18 @@ struct Es8311Dev {
 };
 
 esp_err_t writeReg(es8311_handle_t dev, uint8_t reg, uint8_t value) {
+  if (dev == nullptr) {
+    return ESP_ERR_INVALID_ARG;
+  }
   auto* es = static_cast<Es8311Dev*>(dev);
   const uint8_t buffer[2] = {reg, value};
   return i2c_master_transmit(es->handle, buffer, sizeof(buffer), kI2cTimeoutMs);
 }
 
 esp_err_t readReg(es8311_handle_t dev, uint8_t reg, uint8_t* value) {
+  if (dev == nullptr || value == nullptr) {
+    return ESP_ERR_INVALID_ARG;
+  }
   auto* es = static_cast<Es8311Dev*>(dev);
   return i2c_master_transmit_receive(es->handle, &reg, 1, value, 1, kI2cTimeoutMs);
 }
@@ -99,7 +107,13 @@ esp_err_t configureFormat(es8311_handle_t dev) {
 }  // namespace
 
 es8311_handle_t es8311_create(i2c_master_bus_handle_t bus, uint8_t device_address) {
-  auto* es = new Es8311Dev();
+  if (bus == nullptr) {
+    return nullptr;
+  }
+  auto* es = new (std::nothrow) Es8311Dev();
+  if (es == nullptr) {
+    return nullptr;
+  }
   const i2c_device_config_t devConfig = {
       .dev_addr_length = I2C_ADDR_BIT_LEN_7,
       .device_address = device_address,

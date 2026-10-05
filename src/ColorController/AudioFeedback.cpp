@@ -5,7 +5,7 @@
 
 #include "AwaitConfig.h"
 #include "Config.h"
-#include "Es8311.h"
+#include <Es8311.h>
 #include "driver/i2s_std.h"
 
 namespace AudioFeedback {

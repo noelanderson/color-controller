@@ -16,10 +16,17 @@ constexpr uint8_t kMusicIntensityRange = UINT8_MAX - kMusicMinimumIntensity;
 
 }  // namespace ReactiveLighting
 
+/** Scales a user maximum by a 0-255 effect intensity. */
 inline uint8_t scaleBrightness(uint8_t maximum, uint8_t intensity) {
   return static_cast<uint16_t>(maximum) * intensity / UINT8_MAX;
 }
 
+/**
+ * Produces one smooth cosine breathing cycle in the range 64-255.
+ *
+ * A zero period disables modulation and returns full intensity. Modulo
+ * arithmetic keeps the phase bounded across millis() rollover.
+ */
 inline uint8_t breathingIntensity(uint32_t now, uint32_t periodMs) {
   if (periodMs == 0) {
     return UINT8_MAX;
@@ -29,6 +36,12 @@ inline uint8_t breathingIntensity(uint32_t now, uint32_t periodMs) {
   return static_cast<uint8_t>(ReactiveLighting::kBreathingMinimum + wave * ReactiveLighting::kBreathingRange);
 }
 
+/**
+ * Produces one full-saturation rainbow sample.
+ *
+ * Multiple pixels are evenly phase-shifted around the hue circle. A zero cycle
+ * is treated as one millisecond to avoid division by zero.
+ */
 inline RgbColor rainbowColor(uint32_t now, uint32_t cycleMs, uint16_t pixelIndex, uint16_t pixelCount) {
   if (cycleMs == 0) {
     cycleMs = 1;
@@ -43,6 +56,7 @@ inline RgbColor rainbowColor(uint32_t now, uint32_t cycleMs, uint16_t pixelIndex
   });
 }
 
+/** Maps time and the current audio level to a continuously changing saturated color. */
 inline RgbColor musicColor(uint32_t now, uint8_t level) {
   const uint16_t hue =
       static_cast<uint16_t>((now / ReactiveLighting::kMusicHueStepMs +
@@ -51,6 +65,7 @@ inline RgbColor musicColor(uint32_t now, uint8_t level) {
   return hsvToRgb({hue, UINT8_MAX, UINT8_MAX});
 }
 
+/** Maps audio level 0-255 to the intentionally visible intensity range 32-255. */
 inline uint8_t musicIntensity(uint8_t level) {
   return static_cast<uint8_t>(ReactiveLighting::kMusicMinimumIntensity +
                               static_cast<uint16_t>(level) * ReactiveLighting::kMusicIntensityRange /
@@ -63,6 +78,15 @@ inline uint8_t musicIntensity(uint8_t level) {
  */
 class MusicEnvelope {
  public:
+  /**
+   * Incorporates one non-negative microphone magnitude.
+   *
+   * Quiet samples adapt the floor quickly; near-floor samples adapt slowly so
+   * sustained music is not learned away. Peak decay provides automatic gain,
+   * followed by asymmetric attack/release smoothing.
+   *
+   * @return Smoothed normalized level in the range 0-255.
+   */
   uint8_t update(uint16_t magnitude) {
     if (!initialized_) {
       noiseFloor_ = magnitude;
@@ -96,6 +120,7 @@ class MusicEnvelope {
     return level_;
   }
 
+  /** Forgets floor, peak, and output history before a new music-mode session. */
   void reset() {
     initialized_ = false;
     noiseFloor_ = 0;
@@ -103,6 +128,7 @@ class MusicEnvelope {
     level_ = 0;
   }
 
+  /** @return Most recently calculated normalized level. */
   uint8_t level() const { return level_; }
 
  private:

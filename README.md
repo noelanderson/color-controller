@@ -1,103 +1,137 @@
 # Touch Color Controller
 
-Touch-driven color and brightness control for the Elecrow 3.5-inch ESP32-S3
-320x480 capacitive display (DLE06235B).
+Touch Color Controller turns an Elecrow 3.5-inch ESP32-S3 capacitive display
+(DLE06235B) into a wall-panel controller for addressable LED lighting.
 
-The firmware drives the board's onboard WS2812-compatible addressable LED and,
-optionally, an external array wired to P2 with the same color and brightness.
+The firmware controls the onboard WS2812-compatible LED and can drive an
+optional external strip from GPIO45. It provides editable color presets,
+rainbow and microphone-reactive modes, brightness and power controls, and
+persistent colors.
 
-Ultimate goal is for this to be a wall panel control for led strip lights
+## Features
 
-## User interface
+- 480x320 landscape touch interface
+- Color-wheel selection with live preview
+- Four persistent color presets
+- Slow rainbow breathing effect
+- Microphone-reactive music effect
+- Brightness and non-destructive power controls
+- Optional external WS2812-compatible strip
+- Fixed-memory cooperative scheduling with SimpleAwait
+- Explicit, reusable UI composition in the Arduino sketch
 
-The display runs in 480x320 landscape orientation.
+## Using the interface
 
-- **Top strip:** previews the selected color.
-- **Color wheel:** touch or drag in the left half to choose hue and saturation.
-- **Presets:** tap P1-P4 to recall a color. Hold a preset for at least 700 ms to
-  replace it with the currently selected color. `SAVED` confirms the long press.
-- **P5 Rainbow:** cycles through the full color spectrum with a slow breathing
-  brightness effect. External arrays show a moving rainbow across the strip.
-- **P6 Music:** uses the onboard microphone to pulse a changing color and its
-  brightness with the detected audio level. The musical-note button is outlined
-  in green while active.
-- **ON/OFF:** disables LED output without forgetting the selected color or brightness.
-- **Brightness:** drag the bottom slider from 0 through 255.
+| Control | Behavior |
+|---|---|
+| Color wheel | Touch or drag to select hue and saturation. Selecting a color exits rainbow or music mode. |
+| P1-P4 | Tap to recall. Hold inside for at least 700 ms to store the current color; `SAVED` confirms persistence. |
+| Rainbow | Cycle through the full spectrum with a slow breathing envelope. External strips show a spatial rainbow. |
+| Music | Pulse changing colors and brightness from onboard microphone amplitude. |
+| ON/OFF | Disable or restore LED output without discarding color, brightness, or the active mode. |
+| Brightness | Drag from 0 to 255. In effect modes this sets the maximum effect brightness. |
 
-P1-P4 persist across reboot and power loss as soon as `SAVED` appears. A color
-chosen from the wheel or recalled from a preset is persisted after it remains
-unchanged in solid mode for two minutes. Rainbow and music colors are never
-saved, and entering either effect cancels a pending selected-color save.
-Touching the color wheel or a static preset exits either animated mode. The
-brightness slider is the maximum effect brightness, and power off/on preserves
-the active mode until a reboot; startup always restores in solid mode.
+P1-P4 are saved when `SAVED` appears. A manually selected or recalled solid
+color is saved after it remains unchanged for two minutes. Effect-generated
+colors are never persisted, and entering an effect cancels a pending solid-color
+save. Startup restores the saved solid color and presets.
 
-## Hardware mapping
+The music button shows no status dot during audio initialization. A red dot
+means microphone initialization failed; it never means recording. Music mode
+continues with a dim fallback color cycle when microphone input is unavailable.
 
-| Function                                  | ESP32-S3 pin |
-| ----------------------------------------- | -----------: |
-| Onboard addressable LED data              |      GPIO 40 |
-| LCD QSPI                                  |    GPIO 9-14 |
-| LCD backlight                             |      GPIO 41 |
-| Touch SDA/SCL                             |   GPIO 38/39 |
-| Touch reset/interrupt                     |   GPIO 48/47 |
-| ES8311 microphone I2S data                |      GPIO 16 |
-| ES8311 speaker I2S data                   |      GPIO 15 |
-| P2 output used for external LED data      |      GPIO 45 |
-| P2 alternate GPIO signal                  |      GPIO 46 |
+## Supported hardware
 
-GPIO45 and GPIO46 are both normal input/output-capable GPIOs after reset.
+| Function | ESP32-S3 pin |
+|---|---:|
+| Onboard addressable LED data | GPIO40 |
+| LCD QSPI | GPIO9-GPIO14 |
+| LCD backlight | GPIO41 |
+| Touch SDA/SCL | GPIO38/GPIO39 |
+| Touch reset/interrupt | GPIO48/GPIO47 |
+| ES8311 microphone I2S data | GPIO16 |
+| ES8311 speaker I2S data | GPIO15 |
+| Optional external LED data on P2 | GPIO45 |
+| P2 alternate signal | GPIO46 |
 
-Both pins are ESP32-S3 strapping pins and their logic levels are sampled during
-power-on and hardware reset:
+GPIO45 and GPIO46 are strapping pins. GPIO45 is output-capable and is used for
+the optional LED strip. GPIO46 is input-only on ESP32-S3 and is not suitable for
+LED data output. External circuitry must not drive or back-power either pin
+during reset or while the ESP32-S3 is unpowered.
 
-- **GPIO45** is normally associated wit VDD_SPI voltage selection. However, this
-  board uses an ESP32-S3R8, for which VDD_SPI is fixed to 3.3 V by eFuse, so thhe
-  GPIO45 strap does not control the flash/PSRAM supply voltage on this board.
-- **GPIO46** participates in boot-mode selection together with GPIO0 and also
-  affects ROM boot-message configuration. Its default state is weakly pulled low.
+On ESP32-S3R8 devices, VDD_SPI is fixed to 3.3 V by eFuse, so the GPIO45 strap
+does not select the flash/PSRAM supply voltage. GPIO46 still participates in
+boot configuration.
 
-After reset has completed, both GPIO45 and GPIO46 are available as normal GPIOs.
-
-GPIO45 is used here for the external addressable LED output. External circuitry should
-still avoid strongly driving either strapping pin during reset. A logic-level
-shifter connected to GPIO45 should present a high-impedance input to the ESP32-S3
-and should not back-drive the pin while the ESP32-S3 is unpowered.
-
-## Software prerequisites
+## Prerequisites
 
 - Arduino IDE 2.x or Arduino CLI
 - Espressif ESP32 Arduino core 3.3.x
-- The following libraries from `libraries`:
-  - Repository-owned `AddressableLedStrip` transport using the ESP32 RMT peripheral
+- Python with `esptool` for the Windows build/upload wrapper
+- Repository libraries:
+  - `AddressableLedStrip`
+  - `ES8311`
   - `ST77922`
   - `ST77922_TOUCH`
   - `TFT_eSPI`
-  - `SimpleAwait` 1.0.1
+  - `SimpleAwait`
 
-For Arduino IDE, copy those five folders into the Arduino libraries folder,
-then restart the IDE. Open:
+The repository includes a minimal
+[`AddressableLedStrip`](libraries/AddressableLedStrip/README.md) library that
+uses the ESP32 RMT peripheral directly.
+The focused [`ES8311`](libraries/ES8311/README.md) library attaches the codec to
+the display board's existing shared I2C bus.
 
-`src/ColorController/ColorController.ino`
+### Board settings
 
-Required board settings:
-
-| Setting          | Value                           |
-| ---------------- | ------------------------------- |
-| Board            | ESP32S3 Dev Module              |
-| USB Mode         | Hardware CDC and JTAG           |
-| USB CDC On Boot  | Enabled                         |
-| Flash Size       | 16 MB                           |
+| Setting | Value |
+|---|---|
+| Board | ESP32S3 Dev Module |
+| USB Mode | Hardware CDC and JTAG |
+| USB CDC On Boot | Enabled |
+| Flash Size | 16 MB |
 | Partition Scheme | 16M Flash (3MB APP/9.9MB FATFS) |
-| PSRAM            | OPI PSRAM                       |
-| CPU Frequency    | 240 MHz                         |
+| PSRAM | OPI PSRAM |
+| CPU Frequency | 240 MHz |
 
-## Arduino CLI build
+OPI PSRAM is required for the approximately 307 KB RGB565 framebuffer and the
+vendor display driver's full-frame transfer buffer.
 
-### Standard build
+## Build and upload
 
-Use the original Arduino CLI command in environments where the packaged ESP32
-tools are permitted to run. From the repository root in PowerShell:
+### Recommended Windows workflow
+
+From the repository root:
+
+```powershell
+python -m pip install esptool
+.\tools\build-firmware.ps1
+```
+
+The wrapper serializes concurrent builds, recovers from interrupted build
+caches, and avoids packaged Python executables that can be blocked by Windows
+Application Control.
+
+Useful options:
+
+```powershell
+# Clean onboard-only build
+.\tools\build-firmware.ps1 -Clean
+
+# Build for a 60-pixel external strip
+.\tools\build-firmware.ps1 -ExternalPixelCount 60
+
+# Build and upload
+.\tools\build-firmware.ps1 -Port COM8
+
+# Upload an existing matching build without recompiling
+.\tools\build-firmware.ps1 -UploadOnly -Port COM8
+```
+
+Use the same `-ExternalPixelCount` value for `-UploadOnly` that was used to
+produce the selected output folder.
+
+### Direct Arduino CLI
 
 ```powershell
 arduino-cli compile `
@@ -107,107 +141,118 @@ arduino-cli compile `
   ".\src\ColorController"
 ```
 
-Run only one raw `arduino-cli compile` for this sketch at a time because
-Arduino's default incremental cache is shared. Use the PowerShell wrapper below
-when multiple terminals or automated tools might build concurrently.
+Run only one raw `arduino-cli compile` for this sketch at a time because its
+default incremental cache is shared.
 
-### Windows Application Control fallback
-
-If the standard command fails with `Failed to load Python DLL` because Windows
-Application Control blocks Arduino's packaged Python executables, use:
-
-```powershell
-.\tools\build-firmware.ps1
-```
-
-The script avoids Windows Application Control failures from Arduino's packaged
-Python executables and uses a repository-local build cache to avoid shared-cache
-locks. It serializes concurrent builds and automatically cleans an interrupted
-or incomplete build before reusing the cache. It requires the Python `esptool` package; if needed, run
-`python -m pip install esptool`. Pass `-Clean` to discard the build cache. To
-build for an external array, pass its pixel count, for example
-`.\tools\build-firmware.ps1 -ExternalPixelCount 60`.
-
-This builds with the external array disabled (onboard addressable LED only). To also
-drive an external array on P2, add:
+To enable an external strip without the wrapper:
 
 ```text
 --build-property "compiler.cpp.extra_flags=-DCOLOR_CONTROLLER_EXTERNAL_PIXEL_COUNT=60"
 ```
 
-Replace `60` with the array's pixel count. See
-[Driving an external addressable LED array on P2](#driving-an-external-addressable-led-array-on-p2)
-below.
+### Firmware images
 
-To build and flash in one step over COM8:
+| File | Use |
+|---|---|
+| `ColorController.ino.bin` | Application image uploaded at `0x10000`; normal uploads preserve NVS. |
+| `ColorController.ino.bootloader.bin` | Bootloader image. |
+| `ColorController.ino.partitions.bin` | Partition table. |
+| `ColorController.ino.merged.bin` | Complete image flashed at `0x0`; flashing it erases NVS and resets stored colors. |
 
-```powershell
-.\tools\build-firmware.ps1 -Port COM8
-```
+The GitHub Actions firmware workflow publishes the merged image as a
+30-day artifact named `color-controller-merged-<commit-sha>`.
 
-To flash the existing build again without recompiling, including to a second
-board on another port:
+## Connecting an external LED strip
 
-```powershell
-.\tools\build-firmware.ps1 -UploadOnly -Port COM8
-.\tools\build-firmware.ps1 -UploadOnly -Port COM9
-```
+Build with the strip's exact pixel count and connect its data input to GPIO45 on
+P2. Do not power the strip from a GPIO.
 
-`-UploadOnly` fails if the required files are missing, so run one normal build
-first. Add `-ExternalPixelCount 60` when uploading an existing external-array
-build from its matching output folder.
+Recommended installation:
 
-For policy-restricted Windows systems, the script compiles first and then uses
-`python -m esptool` to flash the bootloader, partition table, boot app, and
-application at their standard offsets, bypassing Arduino's packaged
-`flasher.exe` and `esptool.exe`. It does not overwrite the NVS partition that
-stores presets and the stable selected color.
+- A separate, correctly sized 5 V supply
+- Common ground between the supply and ESP32-S3
+- A 3.3 V-to-5 V unidirectional logic-level shifter
+- A 330-500 ohm series resistor near the first pixel
+- Bulk capacitance across the strip's 5 V input
 
-In an environment without the Python block, the equivalent standard command is:
+Budget up to approximately 60 mA per RGB pixel for worst-case full white.
+Confirm the P2 connector pin order against the board schematic before making a
+cable. The level shifter input must remain high impedance during reset and when
+the controller is unpowered.
 
-```powershell
-arduino-cli compile `
-  --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc" `
-  --libraries ".\libraries" `
-  --output-dir ".\build\onboard-only" `
-  --upload --port COM8 `
-  ".\src\ColorController"
-```
+## Customizing the UI
 
-### Build output
+The UI composition and geometry are intentionally visible near the top of
+[`ColorController.ino`](src/ColorController/ColorController.ino).
 
-The compile command writes persistent build artifacts to the chosen
-`--output-dir` instead of leaving them only in Arduino's temporary cache.
+To build a different screen:
 
-| File                                 | Purpose                                                                                                                                    |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ColorController.ino.merged.bin`     | Complete 16 MB image containing the bootloader, partition table, and application; flashing it at address `0x0` erases NVS and resets stored colors. |
-| `ColorController.ino.bin`            | Application image only; Arduino uploads it at address `0x10000`.                                                                           |
-| `ColorController.ino.bootloader.bin` | Bootloader image.                                                                                                                          |
-| `ColorController.ino.partitions.bin` | Partition-table image.                                                                                                                     |
+1. Declare each element with its geometry and a unique application-owned ID
+   from [`UiElementIds.h`](src/ColorController/UiElementIds.h).
+2. Register interactive elements with `InteractiveControls`.
+3. Register drawable elements with `UiScene` in back-to-front draw order.
+4. Register non-interactive elements, such as `ColorPreviewControl`, only with
+   `UiScene`.
+5. Keep interactive touch regions spatially disjoint.
+6. Increase `InteractiveControls::kCapacity` or `UiScene::kCapacity` only if
+   the new composition needs more entries; failed registration is reported at
+   startup.
+7. If the new UI requires additional coroutines, update the fixed task and
+   frame-pool budgets in [`AwaitConfig.h`](src/ColorController/AwaitConfig.h).
+   The current application uses five of its six task slots.
 
-For normal development, prefer `arduino-cli compile --upload` so Arduino places
-each image at the correct address. Use the merged image when a flashing tool
-expects one complete binary and resetting persisted colors is acceptable.
+An element may implement:
 
-OPI PSRAM is required for the approximately 307 KB RGB565 framebuffer and the
-vendor display driver's full-frame transfer buffer. The sketch stops with a
-fatal Serial message if the framebuffer cannot be allocated.
+- `InteractiveControl` for touch claiming, movement, release, and timed
+  lifecycle work
+- `UiElement` for initial drawing, regular drawing, and notifications
+- Both contracts for a normal interactive control
 
-## CI/CD firmware artifact
+The dispatcher offers touch-down data to registered interactive elements. The
+element that claims the contact exclusively receives subsequent move and
+debounced release events. Elements emit semantic `UiAction` values rather than
+writing persistence, LEDs, audio, or application state directly.
 
-The [Build firmware workflow](.github/workflows/build-firmware.yml) runs for
-pushes to `main`, pull requests, and manual dispatches. It installs ESP32 Arduino
-core 3.3.12, compiles the onboard-only firmware, verifies the merged image, and
-publishes `ColorController.ino.merged.bin` as a 30-day GitHub Actions artifact
-named `color-controller-merged-<commit-sha>`.
+Shared visual style constants live in
+[`UiLayout.h`](src/ColorController/UiLayout.h). Element geometry belongs to the
+composition root and is used by the element for both drawing and hit testing.
 
-The merged binary contains the bootloader, partition table, and application and
-is intended for tools that flash a complete image at address `0x0`.
+See [UX interaction and class diagrams](docs/ux-interaction-and-class-diagrams.md)
+for the complete event and ownership model.
 
-## Host-side tests
+## Verify a board
 
-From a Visual Studio Developer PowerShell:
+After flashing:
+
+1. Confirm landscape orientation and alignment for every control.
+2. Drag through red, green, and blue on the wheel and verify LED channel order.
+3. Tap each preset once.
+4. Hold each preset until `SAVED`, recall it, then reboot and confirm persistence.
+5. Sweep brightness to both endpoints.
+6. Toggle power after changing color and brightness.
+7. Verify rainbow cycling and breathing.
+8. Verify music response to transients and its slower decay.
+9. Adjust brightness and power in both effect modes.
+10. Release a preset outside its bounds and confirm no recall or store occurs.
+11. Power-cycle repeatedly, especially when an external GPIO45 strip is fitted.
+12. Verify a stable solid color survives reboot after two minutes.
+13. Verify entering an effect before two minutes prevents saving an effect color.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Blank display | Confirm OPI PSRAM and the required partition/flash settings. Check Serial for framebuffer or display initialization failures. |
+| Touch does not respond | Confirm display/touch rotation is 1 and inspect Serial for touch initialization warnings. |
+| Music button has a red dot | Microphone initialization failed. Check ES8311/I2S wiring and Serial diagnostics. |
+| External strip does not light | Confirm the compiled pixel count, GPIO45 data wiring, common ground, level shifting, and external 5 V power. |
+| Board does not boot with external hardware | Ensure nothing drives GPIO45 or GPIO46 during reset. |
+| Presets do not survive reboot | Wait for `SAVED`; avoid flashing a merged image at `0x0`, which erases NVS. |
+| Packaged ESP32 tools fail under Windows policy | Use `tools\build-firmware.ps1` and install Python `esptool`. |
+
+## Development
+
+Run the host-side tests from a Visual Studio Developer PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force build | Out-Null
@@ -218,140 +263,11 @@ cl /std:c++20 /EHsc `
 .\build\color_math_tests.exe
 ```
 
-The tests cover primary and round-trip color conversion, wheel bounds,
-brightness mapping, preset tap/hold/cancel behavior, mode transitions, rainbow
-and breathing math, microphone-envelope smoothing, persistence timing and
-cancellation, packed-color storage, and timer rollover.
+The tests cover color conversion, wheel and brightness mapping, preset gestures,
+touch capture/debounce, collection capacity and duplicate registration,
+reactive effects, persistence policy, and timer rollover.
 
-## Driving an external addressable LED array on P2
-
-The onboard addressable LED on GPIO40 is always driven. To also drive an external
-array wired to P2 using GPIO45, build with the array's pixel count:
-
-```powershell
-arduino-cli compile `
-  --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc" `
-  --libraries ".\libraries" `
-  --output-dir ".\build\onboard-plus-p2-60pixels" `
-  --build-property "compiler.cpp.extra_flags=-DCOLOR_CONTROLLER_EXTERNAL_PIXEL_COUNT=60" `
-  ".\src\ColorController"
-```
-
-That command writes the artifacts to:
-
-`build/onboard-plus-p2-60pixels/`
-
-Change both the pixel-count define and output folder name when building for a
-different array size. Omitting the define, or setting it to `0`, disables the
-external array and drives only the onboard addressable LED.
-
-Do not power an external array from a GPIO. Use a properly sized 5 V supply and
-connect the supply ground to the ESP32-S3 ground.
-
-For reliable WS2812-compatible LED operation, a typical installation uses:
-
-- A 3.3 V-to-5 V logic-level shifter with a high-impedance input
-- A 330-500 ohm series resistor near the first pixel
-- Bulk capacitance across the array's 5 V supply
-- A common ground between the array supply and the ESP32-S3
-
-Budget up to approximately 60 mA per RGB pixel as a conservative full-white
-worst-case estimate. Actual consumption depends on the addressable LED type,
-brightness setting, and displayed color.
-
-Because GPIO45 is a strapping pin, the external circuit should not drive or
-back-power it while the ESP32-S3 is starting or unpowered. A conventional
-unidirectional logic buffer with a high-impedance input is suitable.
-
-Confirm the P2 connector pin order against the board schematic before making a
-cable.
-
-## On-device verification
-
-After flashing:
-
-1. Confirm the UI is landscape and touch coordinates align with every control.
-2. Drag through red, green, and blue portions of the wheel and verify the top
-   strip and onboard LED channel order.
-3. Tap P1-P4 and verify the selected color changes once.
-4. Hold P1-P4 until `SAVED`, select another color, then tap the saved preset.
-   Reboot and confirm the stored preset remains.
-5. Sweep brightness to both endpoints.
-6. Turn output off, change color and brightness, then turn it on and verify the
-   latest settings are restored.
-7. Tap P5 and verify a full hue cycle with a smooth, slow breathing effect.
-   With an external array, verify the rainbow is distributed across the strip.
-8. Tap the musical-note P6 button, play music near the onboard microphone, and
-   verify brightness responds quickly to transients and decays smoothly.
-9. While each effect is active, adjust brightness, toggle power, and touch the
-   wheel to verify the documented mode transitions.
-10. Drag out of a pressed preset before release and verify it is not recalled or
-   overwritten.
-11. With the external addressable LED array connected, power-cycle and reset the board
-   several times and confirm reliable booting.
-12. Select a solid color, wait at least two minutes without changing it, reboot,
-    and confirm it is restored.
-13. Select a solid color, enter rainbow or music before two minutes elapse,
-    reboot, and confirm the effect-generated color was not stored.
-
-Microphone sensitivity and the perceived breathing speed require final tuning
-on the physical board. P6 does not show a status indicator while its microphone
-is initializing. If initialization definitively fails, Serial reports a warning
-and P6 shows a red fault dot; the dot never indicates recording. Music mode
-continues as a dim fallback color cycle without affecting the other controls.
-
-## Design notes
-
-The UI uses a 16-bit TFT_eSPI sprite backed by the PSRAM-enabled ESP32 allocator
-and sends that buffer through Elecrow's ST77922 QSPI driver.
-
-Touch processing uses a non-blocking state machine, including long-press
-detection. Fixed-memory SimpleAwait C++20 tasks schedule touch polling, effect
-frames, effect UI refreshes, audio initialization/feedback, and delayed NVS
-writes. Arduino `loop()` contains only `simpleawait::poll()`; application waits
-use coroutine delay primitives rather than blocking delay calls. The vendored
-ESP32 scheduler yields one RTOS tick when no coroutine is ready so driver and
-idle work are not starved by the poll-only Arduino loop.
-
-The initial framebuffer is transferred before touch-controller initialization.
-Touch startup bounds stale-status retries and reports I2C/status failure rather
-than leaving the panel on its uninitialized pixel pattern indefinitely.
-Display SPI and touch I2C are initialized explicitly from `setup()`; their
-global C++ constructors never access hardware, which keeps cold power-on
-behavior consistent with warm resets. The display backlight remains off until
-the first complete framebuffer transfer, so uninitialized panel memory is never
-shown during cold-start NVS and color-wheel setup.
-
-### Classes and components
-
-| Component               | Responsibility                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ControllerModel`       | Owns the selected color, brightness, power state, active output mode, and four presets.                                   |
-| `InteractionController` | Routes touch gestures into model, lighting, persistence, audio, and UI actions.                                           |
-| `AddressableLedStrip`   | Owns the minimal WS2812-compatible GRB encoder, frame buffer, and ESP32 RMT transport.                                    |
-| `LightingOutput`        | Owns addressable LED outputs, reactive effect state, microphone envelope, and live preview color.                         |
-| `ColorWheelControl`     | Owns wheel hit testing, color mapping, rendering, and selection-marker repair state.                                     |
-| `BrightnessSliderControl` | Owns slider hit testing, touch-coordinate mapping, labels, track, and knob rendering.                                  |
-| `PowerButtonControl`    | Owns power-button hit testing, state-dependent label/color selection, and rendering.                                     |
-| `ColorPreviewControl`   | Renders the selected solid color or live effect color in the top preview strip.                                          |
-| `UiRenderer`            | Coordinates framebuffer rendering, transient saved feedback, and complete panel transfers.                              |
-| `UiLayout`              | Defines named screen geometry, hit regions, glyph dimensions, and RGB565 theme values.                                   |
-| `UiDrawing`             | Provides shared RGB565 conversion and centered-text primitives for focused UI controls.                                 |
-| `ColorPersistenceService` | Coordinates delayed selected-color writes, queued preset writes, and retry timing.                                     |
-| `PersistentState`       | Restores and deduplicates Preferences/NVS writes for presets and the stable selected color.                               |
-| `ManualColorSaveTracker` | Tracks manual color changes, cancellation, rollover-safe elapsed time, and save readiness.                                |
-| `SimpleAwait`           | Runs fixed-memory cooperative tasks for touch, effects, UI refresh, audio sequencing, and persistence.                   |
-| `PresetGesture`         | Distinguishes a preset tap from a 700 ms hold and guarantees that a stored preset is not also recalled on release.       |
-| `RgbColor` / `HsvColor` | Small color value types shared by the model, renderer, tests, and addressable LED adapter.                                |
-| `ColorMath` functions   | Convert RGB/HSV values, map wheel coordinates to color, and map slider coordinates to brightness.                        |
-| `ReactiveLighting`      | Provides host-tested rainbow, breathing, music-color, brightness-scaling, and adaptive audio-envelope math.              |
-| `AudioFeedback`         | Asynchronously initializes duplex ES8311 audio, queues touch beeps, and reads non-blocking microphone amplitude samples. |
-| `ColorController.ino`   | Composes services, initializes hardware, starts SimpleAwait tasks, and provides the poll-only Arduino loop.               |
-
-The code comments use Doxygen-style summaries for reusable types and public
-methods. Straightforward drawing calls are left uncluttered; comments focus on
-hardware constraints, timing behavior, and non-obvious performance choices.
-
-The detailed functional and technical plan is in:
-
-`specs/feature-touch-color-controller/specs-touch-color-controller-funct-and-tech.md`
+Implementation constraints and contributor validation commands are documented
+in [`AGENTS.md`](AGENTS.md). Detailed requirements and implementation status are
+kept in the [technical specification](specs/feature-touch-color-controller/specs-touch-color-controller-funct-and-tech.md),
+not in this adopter README.

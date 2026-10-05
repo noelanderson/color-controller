@@ -1,0 +1,173 @@
+@startuml
+title Touch UI control architecture
+
+skinparam backgroundColor transparent
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam linetype ortho
+skinparam packageStyle rectangle
+
+class InteractionController {
+  +poll(now)
+}
+
+class ColorControllerSketch <<composition root>> {
+  +configureUserInterface() : bool
+  +setup()
+  +loop()
+}
+
+class UiElementIds <<application IDs>> {
+  +kPreview : UiElementId
+  +kWheel : UiElementId
+  +preset(index) : UiElementId
+}
+
+interface InteractiveControl {
+  +tryTouchDown(event) : TouchClaim
+  +touchMove(event) : UiAction
+  +touchUp(event) : UiAction
+  +tick(now) : UiAction
+}
+
+abstract class ButtonControl {
+  -pressed
+  +tryTouchDown(event) : TouchClaim
+  +touchMove(event) : UiAction
+  +touchUp(event) : UiAction
+}
+
+class TouchDispatcher {
+  -captured : InteractiveControl
+  -contactState
+  +update(touching, point, now) : UiAction
+}
+
+class UiActionProcessor {
+  +process(action, now)
+}
+
+class InteractiveControls {
+  +add(control) : bool
+  +count() : uint8_t
+  +at(index) : InteractiveControl
+  +tick(now) : UiAction
+}
+
+interface UiElement {
+  +id() : UiElementId
+  +drawInitial(context)
+  +draw(context)
+  +notify(notification)
+}
+
+class UiScene {
+  +add(element) : bool
+  +drawInitial(context)
+  +draw(context)
+  +draw(id, context) : bool
+  +notify(id, notification) : bool
+}
+
+class ColorWheelControl {
+  -markerX
+  -markerY
+  +draw()
+  +drawMarker(color)
+}
+
+class BrightnessSliderControl {
+  +draw(context)
+}
+
+class PowerButtonControl {
+  +draw(context)
+}
+
+class ColorPreviewControl {
+  +draw(context)
+}
+
+class PresetButtonControl {
+  -gesture : PresetGesture
+  -savedUntil
+  +tick(now) : UiAction
+  +notify(notification)
+  +draw(context)
+}
+
+class ModeButtonControl {
+  -mode : OutputMode
+  +draw(context)
+}
+
+class PresetGesture {
+  -state
+  -startedAt
+  +begin(now)
+  +update(now, inside, holdMs) : PresetGestureEvent
+  +release(inside) : PresetGestureEvent
+}
+
+class UiRenderer {
+  +drawInitialUi(effectColor)
+  +drawDynamicUi(effectColor)
+  +drawElement(id, effectColor)
+  +notifyElement(id, notification)
+  +flushDisplay()
+}
+
+ColorControllerSketch *-- ColorWheelControl
+ColorControllerSketch *-- BrightnessSliderControl
+ColorControllerSketch *-- PowerButtonControl
+ColorControllerSketch *-- ColorPreviewControl
+ColorControllerSketch *-- "4" PresetButtonControl
+ColorControllerSketch *-- "2" ModeButtonControl
+ColorControllerSketch *-- InteractiveControls
+ColorControllerSketch *-- UiScene
+ColorControllerSketch --> UiElementIds : assigns IDs
+InteractiveControls o-- InteractiveControl
+UiScene o-- UiElement
+
+InteractiveControl <|.. ColorWheelControl
+InteractiveControl <|.. BrightnessSliderControl
+InteractiveControl <|.. ButtonControl
+UiElement <|.. ColorWheelControl
+UiElement <|.. BrightnessSliderControl
+UiElement <|.. PowerButtonControl
+UiElement <|.. ColorPreviewControl
+UiElement <|.. PresetButtonControl
+UiElement <|.. ModeButtonControl
+ButtonControl <|-- PowerButtonControl
+ButtonControl <|-- PresetButtonControl
+ButtonControl <|-- ModeButtonControl
+PresetButtonControl *-- PresetGesture
+
+InteractionController --> TouchDispatcher : normalized samples
+TouchDispatcher --> InteractiveControls : enumerate controls
+TouchDispatcher --> InteractiveControl : offer down, capture claimant
+InteractionController --> UiActionProcessor : actions and ticks
+UiActionProcessor --> UiRenderer : requests redraws
+UiRenderer --> UiScene : draws scene or element ID
+ColorControllerSketch --> InteractiveControls : registers input in setup()
+ColorControllerSketch --> UiScene : registers drawing in setup()
+
+note right of InteractionController
+  Sole touch-hardware reader.
+end note
+
+note right of TouchDispatcher
+  Owns contact lifecycle,
+  target capture, and release debounce.
+end note
+
+note bottom of InteractiveControls
+  Generic fixed-memory input
+  and lifecycle collection.
+end note
+
+note bottom of UiScene
+  Generic fixed-memory drawable
+  element collection.
+end note
+@enduml

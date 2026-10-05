@@ -3,7 +3,12 @@
 #include <math.h>
 #include <stdint.h>
 
-/** An 8-bit-per-channel RGB color shared by the UI and addressable LED output. */
+/**
+ * An 8-bit-per-channel RGB color shared by the model, UI, and lighting layer.
+ *
+ * Channel values are linear controller values; gamma correction is not
+ * applied by this type.
+ */
 struct RgbColor {
   uint8_t red;
   uint8_t green;
@@ -16,7 +21,12 @@ struct RgbColor {
   constexpr bool operator!=(const RgbColor& other) const { return !(*this == other); }
 };
 
-/** An HSV color with hue in degrees and saturation/value in the range 0-255. */
+/**
+ * HSV color used for wheel and effect calculations.
+ *
+ * hue is expressed in degrees and wraps at 360. saturation and value use the
+ * inclusive range 0-255.
+ */
 struct HsvColor {
   uint16_t hue;
   uint8_t saturation;
@@ -28,7 +38,12 @@ constexpr uint16_t kHueCircleDegrees = 360;
 constexpr uint8_t kHueRegionDegrees = 60;
 constexpr uint8_t kColorChannelMax = UINT8_MAX;
 
-/** Converts HSV to RGB using integer channel arithmetic. */
+/**
+ * Converts HSV to RGB using integer channel arithmetic.
+ *
+ * @param hsv Hue may exceed 359 and is normalized modulo 360.
+ * @return Equivalent 8-bit RGB color.
+ */
 inline RgbColor hsvToRgb(const HsvColor& hsv) {
   if (hsv.saturation == 0) {
     return {hsv.value, hsv.value, hsv.value};
@@ -65,7 +80,11 @@ inline RgbColor hsvToRgb(const HsvColor& hsv) {
   }
 }
 
-/** Converts RGB to HSV for positioning the marker on the color wheel. */
+/**
+ * Converts RGB to HSV for positioning the marker on the color wheel.
+ *
+ * Achromatic colors return hue zero because no unique hue exists.
+ */
 inline HsvColor rgbToHsv(const RgbColor& rgb) {
   const uint8_t redGreenMaximum = rgb.red > rgb.green ? rgb.red : rgb.green;
   const uint8_t redGreenMinimum = rgb.red < rgb.green ? rgb.red : rgb.green;
@@ -100,6 +119,13 @@ inline HsvColor rgbToHsv(const RgbColor& rgb) {
  * Hue is determined by angle, saturation by distance from the center, and
  * value is fixed at full brightness. Returns false when the point is outside
  * the wheel and leaves color unchanged.
+ *
+ * @param x Horizontal framebuffer coordinate.
+ * @param y Vertical framebuffer coordinate.
+ * @param centerX Wheel center x-coordinate.
+ * @param centerY Wheel center y-coordinate.
+ * @param radius Wheel radius in pixels; must be positive.
+ * @param color Receives the mapped color on success.
  */
 inline bool colorFromWheel(int16_t x, int16_t y, int16_t centerX, int16_t centerY, int16_t radius,
                            RgbColor& color) {
@@ -122,7 +148,13 @@ inline bool colorFromWheel(int16_t x, int16_t y, int16_t centerX, int16_t center
   return true;
 }
 
-/** Maps and clamps a horizontal slider coordinate to the range 0-255. */
+/**
+ * Maps and clamps a horizontal slider coordinate to the range 0-255.
+ *
+ * @param x Coordinate to map.
+ * @param minimumX Coordinate producing zero.
+ * @param maximumX Coordinate producing 255; must exceed minimumX.
+ */
 inline uint8_t brightnessFromX(int16_t x, int16_t minimumX, int16_t maximumX) {
   if (x <= minimumX) {
     return 0;

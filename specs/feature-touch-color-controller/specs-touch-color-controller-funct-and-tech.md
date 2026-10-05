@@ -79,16 +79,23 @@ The firmware has the following responsibilities:
 
 1. `ColorController.ino` is the composition root for hardware initialization and cooperative tasks.
 2. `ControllerModel` owns color, brightness, power, presets, and the active output mode.
-3. `InteractionController` owns touch routing and coordinates user-driven state changes.
-4. `UiRenderer` and `UiLayout` own framebuffer rendering, panel transfers, and named geometry.
-5. `LightingOutput` owns addressable LED outputs, reactive state, and the live effect preview.
-6. `ColorPersistenceService` coordinates delayed and queued writes through `PersistentState`.
-7. `ColorMath` and `ReactiveLighting` provide host-tested color, animation, and envelope calculations.
-8. `AudioFeedback` runs ES8311 speaker output and onboard microphone input over duplex I2S.
-9. SimpleAwait C++20 tasks schedule touch, effects, effect UI, audio, and persistence.
-10. The ST77922 display/touch drivers are consumed from the supplied vendor resource pack.
+3. `InteractionController` is the sole touch-hardware reader and forwards samples to `TouchDispatcher`.
+4. `TouchDispatcher` offers normalized touch-down data to each registered control and captures the sole claimant.
+5. Controls own their gesture state and emit `UiAction` values; `UiActionProcessor` coordinates side effects.
+6. `UiRenderer` and `UiLayout` own framebuffer rendering, panel transfers, and named geometry.
+7. `LightingOutput` owns addressable LED outputs, reactive state, and the live effect preview.
+8. `ColorPersistenceService` coordinates delayed and queued writes through `PersistentState`.
+9. `ColorMath` and `ReactiveLighting` provide host-tested color, animation, and envelope calculations.
+10. `AudioFeedback` runs ES8311 speaker output and onboard microphone input over duplex I2S.
+11. SimpleAwait C++20 tasks schedule touch, effects, effect UI, audio, and persistence.
+12. The ST77922 display/touch drivers are consumed from the supplied vendor resource pack.
 
-The repository-owned `AddressableLedStrip` class provides the minimal WS2812-compatible GRB encoder and ESP32 RMT transport. `TFT_eSPI` supplies a PSRAM-backed software sprite used as the RGB565 framebuffer; the vendor ST77922 driver transfers that framebuffer to the QSPI display.
+The repository-owned `AddressableLedStrip` Arduino library provides the minimal
+WS2812-compatible GRB encoder and ESP32 RMT transport. The repository-owned
+`ES8311` Arduino library attaches the codec to the touch controller's existing
+I2C bus and exposes the fixed audio operating point. `TFT_eSPI` supplies a
+PSRAM-backed software sprite used as the RGB565 framebuffer; the vendor ST77922
+driver transfers that framebuffer to the QSPI display.
 
 ### Dependencies
 
@@ -235,12 +242,55 @@ The repository-owned `AddressableLedStrip` class provides the minimal WS2812-com
   rendering, and marker state into a self-contained control.
 - [COMPLETED] Step 8.2 - Extract brightness slider, power button, and color preview
   rendering and touch behavior into focused controls.
-- [] Step 8.3 - Extract P1-P6 hit testing, press/hold/release state, saved
+- [COMPLETED] Step 8.3 - Extract P1-P6 hit testing, press/hold/release state, saved
   feedback, icons, and rendering into a preset/mode control group.
-- [] Step 8.4 - Reduce `UiRenderer` to framebuffer coordination and
+- [COMPLETED] Step 8.4 - Reduce `UiRenderer` to framebuffer coordination and
   `InteractionController` to routing semantic control events.
-- [] Step 8.5 - Complete host tests, clean firmware builds, alternative-model
-  review, and physical touch verification for the componentized UI.
+- [COMPLETED] Step 8.5 - Complete host tests, clean onboard/external firmware
+  builds, and alternative-model review for the componentized UI.
+- [COMPLETED] Step 8.6 - Run a final target-board smoke test of P1-P6 tap, hold,
+  drag-cancel, mode selection, saved feedback, and microphone status.
+
+### Stage 9: Independent Control Input
+
+- [COMPLETED] Step 9.1 - Add hardware-independent touch events, semantic UI
+  actions, and an interactive-control contract.
+- [COMPLETED] Step 9.2 - Add a shared `ButtonControl` base with power, preset,
+  and mode specializations.
+- [COMPLETED] Step 9.3 - Move wheel, slider, button, preset, and mode gesture
+  behavior into their owning controls.
+- [COMPLETED] Step 9.4 - Extract pointer capture and release debounce into
+  `TouchDispatcher`, preserving one control for the complete contact.
+- [COMPLETED] Step 9.5 - Extract application side effects into
+  `UiActionProcessor` and retain one SimpleAwait touch task as the sole hardware reader.
+- [COMPLETED] Step 9.6 - Add host coverage for capture/debounce and complete
+  onboard/external firmware, documentation, and diagram validation.
+- [COMPLETED] Step 9.7 - Repeat the P1-P6, wheel, slider, and power smoke test on the
+  physical controller after the input-ownership refactor.
+
+### Stage 10: Visible UI Composition
+
+- [COMPLETED] Step 10.1 - Declare the concrete wheel, P1-P6, power, slider,
+  and preview controls in the sketch composition root.
+- [COMPLETED] Step 10.2 - Register every interactive element from `setup()`
+  and document non-overlapping touch regions as a required layout invariant.
+- [COMPLETED] Step 10.3 - Pass each element's geometry from the sketch so the
+  element uses one set of bounds for its drawing, hit testing, and local state.
+- [COMPLETED] Step 10.4 - Let every registered element inspect touch-down data
+  and claim its own contacts; route subsequent move/up data only to the claimant.
+- [COMPLETED] Step 10.5 - Repeat the target-board UI smoke test after the composition and lifecycle refactor.
+
+### Stage 11: Generic UI Collections
+
+- [COMPLETED] Step 11.1 - Replace the concrete-control `UiControls` facade with
+  a generic fixed-memory `InteractiveControls` input/lifecycle collection.
+- [COMPLETED] Step 11.2 - Add a generic fixed-memory `UiScene` and `UiElement`
+  rendering contract.
+- [COMPLETED] Step 11.3 - Register the sketch-owned controls independently for
+  input and rendering, with the non-interactive preview registered only in the scene.
+- [COMPLETED] Step 11.4 - Route targeted redraws and preset saved feedback
+  through scene element IDs and notifications.
+- [COMPLETED] Step 11.5 - Repeat the target-board UI smoke test after the generic collection split.
 
 ---
 
@@ -267,6 +317,11 @@ The repository-owned `AddressableLedStrip` class provides the minimal WS2812-com
 
 - External addressable LED arrays should not be powered from a GPIO. Size the 5 V supply for worst-case current, connect grounds, and consider a 3.3 V-to-5 V level shifter and series data resistor.
 - GPIO 45 is a strapping pin, so v2 wiring must not force its level during reset.
-- Physical touch alignment, perceived refresh responsiveness, and RGB channel order still require validation on the target board.
+- Physical touch alignment, componentized control responsiveness, P1-P6
+  gestures, saved feedback, mode selection, and RGB channel order passed final
+  target-board verification.
 - Microphone level, noise-floor adaptation, and breathing cadence require
   final tuning on the physical controller.
+- The extracted color wheel, brightness slider, power button, preview strip,
+  and P1-P6 controls passed a physical target-board smoke test after the final
+  componentization.

@@ -1,7 +1,8 @@
 #pragma once
 
-// ES8311 register addresses used by Es8311.cpp. Subset of Espressif's
-// vendor es8311_reg.h (Apache-2.0), trimmed to the registers this driver uses.
+// ES8311 register addresses used by Es8311.cpp. This is the subset required by
+// the fixed operating point and is derived from Espressif's Apache-2.0-licensed
+// ES8311 driver.
 
 #define ES8311_RESET_REG00 0x00
 

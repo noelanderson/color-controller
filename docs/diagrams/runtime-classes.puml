@@ -1,0 +1,122 @@
+@startuml
+title Controller runtime and service architecture
+
+skinparam backgroundColor transparent
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam linetype ortho
+skinparam packageStyle rectangle
+
+class ControllerModel {
+  -selected : RgbColor
+  -presets[4] : RgbColor
+  -brightness : uint8_t
+  -powerOn : bool
+  -mode : OutputMode
+  +select(color)
+  +setBrightness(brightness)
+  +togglePower()
+  +setMode(mode)
+  +storePreset(index)
+}
+
+class InteractionController {
+  +poll(now)
+}
+
+class TouchDispatcher {
+  +update(touching, point, now) : UiAction
+}
+
+class UiActionProcessor {
+  +process(action, now)
+}
+
+class LightingOutput {
+  +begin()
+  +apply(now)
+  +previewColor() : RgbColor
+  +resetMusicEnvelope()
+}
+
+class AddressableLedStrip {
+  +begin() : bool
+  +setPixelColor(index, color)
+  +setBrightness(brightness)
+  +show()
+}
+
+class ColorPersistenceService {
+  +begin(model) : bool
+  +noteManualColor(color, now)
+  +cancelManualColor()
+  +queuePresetSave(index, color, now)
+  +process(now, model)
+}
+
+class AudioFeedback <<namespace>> {
+  +start(touchBus) : bool
+  +microphoneStatus() : MicrophoneStatus
+  +readMicrophoneLevel(magnitude) : bool
+  +beep()
+  +beepLong()
+}
+
+class ES8311 <<library>> {
+  +create(bus, address) : handle
+  +init_begin(handle) : esp_err_t
+  +init_finish(handle) : esp_err_t
+  +microphone_config(handle) : esp_err_t
+  +voice_volume_set(handle, volume) : esp_err_t
+  +voice_mute(handle, mute) : esp_err_t
+}
+
+class UiRenderer {
+  +drawInitialUi(effectColor)
+  +drawDynamicUi(effectColor)
+  +drawElement(id, effectColor) : bool
+  +notifyElement(id, notification) : bool
+  +flushDisplay()
+}
+
+class UiScene {
+  +drawInitial(context)
+  +draw(context)
+  +draw(id, context) : bool
+  +notify(id, notification) : bool
+}
+
+class ST77922_TOUCH <<hardware adapter>>
+class ST77922 <<hardware adapter>>
+class TFT_eSprite <<framebuffer>>
+
+InteractionController --> ST77922_TOUCH : reads samples
+InteractionController --> TouchDispatcher : forwards samples
+InteractionController --> UiActionProcessor : forwards actions
+UiActionProcessor --> ControllerModel : updates state
+UiActionProcessor --> LightingOutput : applies output
+UiActionProcessor --> ColorPersistenceService : schedules saves
+UiActionProcessor --> AudioFeedback : requests feedback
+UiActionProcessor --> UiRenderer : requests redraws
+
+LightingOutput --> ControllerModel : reads output state
+LightingOutput *-- AddressableLedStrip
+LightingOutput --> AudioFeedback : reads microphone level
+AudioFeedback --> ES8311 : configures shared-bus codec
+
+ColorPersistenceService --> ControllerModel : restores and persists
+UiRenderer --> ControllerModel : reads display state
+UiRenderer --> UiScene : delegates element drawing
+UiRenderer --> TFT_eSprite : draws complete frame
+UiRenderer --> ST77922 : transfers frame
+
+note bottom of UiActionProcessor
+  Application side effects remain outside
+  focused UI controls.
+end note
+
+note bottom of AudioFeedback
+  Owns its SimpleAwait service task,
+  codec, microphone, and beep sequencing.
+end note
+@enduml

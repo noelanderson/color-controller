@@ -6,11 +6,15 @@
 #include <cstdlib>
 #include <iostream>
 
+#include "../src/ColorController/ButtonControl.h"
 #include "../src/ColorController/ColorMath.h"
 #include "../src/ColorController/ControllerModel.h"
+#include "../src/ColorController/InteractiveControls.h"
 #include "../src/ColorController/PersistencePolicy.h"
 #include "../src/ColorController/PresetGesture.h"
 #include "../src/ColorController/ReactiveLighting.h"
+#include "../src/ColorController/TouchDispatcher.h"
+#include "../src/ColorController/UiGeometry.h"
 
 namespace {
 
@@ -49,6 +53,23 @@ void testWheelGeometry() {
   assert(!colorFromWheel(151, 100, 100, 100, 50, color));
 }
 
+void testWheelMarkerRepairBounds() {
+  constexpr Ui::Circle wheel{120, 132, 105};
+  constexpr Ui::Rect repair = Ui::expandedBounds(wheel, 8);
+
+  static_assert(repair.x == 7);
+  static_assert(repair.y == 19);
+  static_assert(repair.width == 227);
+  static_assert(repair.height == 227);
+
+  assert(Ui::contains(repair, 120, 19));
+  assert(Ui::contains(repair, 120, 245));
+  assert(Ui::contains(repair, 7, 132));
+  assert(Ui::contains(repair, 233, 132));
+  assert(!Ui::contains(repair, 120, 18));
+  assert(!Ui::contains(repair, 234, 132));
+}
+
 void testBrightnessMapping() {
   assert(brightnessFromX(50, 100, 200) == 0);
   assert(brightnessFromX(100, 100, 200) == 0);
@@ -77,6 +98,76 @@ void testPresetGesture() {
 
   gesture.begin(UINT32_MAX - 100);
   assert(gesture.update(650, true, 700) == PresetGestureEvent::kStore);
+}
+
+class TestButton : public ButtonControl {
+ public:
+  TestButton() : ButtonControl({10, 20, 30, 40}) {}
+
+  uint8_t presses = 0;
+  uint8_t moves = 0;
+  uint8_t releases = 0;
+  bool lastReleaseInside = false;
+
+ protected:
+  UiAction onPress(const TouchEvent&) override {
+    ++presses;
+    return {};
+  }
+
+  UiAction onMove(const TouchEvent&, bool) override {
+    ++moves;
+    return {};
+  }
+
+  UiAction onRelease(const TouchEvent&, bool releasedInside) override {
+    ++releases;
+    lastReleaseInside = releasedInside;
+    return releasedInside ? UiAction::togglePower() : UiAction{};
+  }
+};
+
+void testButtonAndTouchDispatch() {
+  TestButton button;
+  InteractiveControls controls;
+  assert(controls.add(button));
+  TouchDispatcher dispatcher(controls);
+
+  assert(dispatcher.update(true, {15, 25}, 100).type == UiActionType::kNone);
+  assert(button.presses == 1);
+
+  assert(dispatcher.update(false, {}, 105).type == UiActionType::kNone);
+  assert(dispatcher.update(true, {50, 25}, 110).type == UiActionType::kNone);
+  assert(button.presses == 1);
+  assert(button.moves == 1);
+
+  for (uint8_t miss = 0; miss + 1 < Config::kReleaseDebouncePolls; ++miss) {
+    assert(dispatcher.update(false, {}, 115 + miss).type == UiActionType::kNone);
+  }
+  const UiAction outsideRelease = dispatcher.update(false, {}, 120);
+  assert(outsideRelease.type == UiActionType::kNone);
+  assert(button.releases == 1);
+  assert(!button.lastReleaseInside);
+
+  dispatcher.update(true, {15, 25}, 200);
+  UiAction release;
+  for (uint8_t miss = 0; miss < Config::kReleaseDebouncePolls; ++miss) {
+    release = dispatcher.update(false, {}, 205 + miss);
+  }
+  assert(release.type == UiActionType::kTogglePower);
+  assert(button.releases == 2);
+  assert(button.lastReleaseInside);
+
+  InteractiveControls fullCollection;
+  TestButton buttons[InteractiveControls::kCapacity];
+  for (uint8_t index = 0; index < InteractiveControls::kCapacity; ++index) {
+    assert(fullCollection.add(buttons[index]));
+  }
+  assert(!fullCollection.add(button));
+
+  InteractiveControls duplicateCollection;
+  assert(duplicateCollection.add(button));
+  assert(!duplicateCollection.add(button));
 }
 
 void testControllerModes() {
@@ -163,8 +254,10 @@ int main() {
   testPrimaryColors();
   testRgbRoundTrip();
   testWheelGeometry();
+  testWheelMarkerRepairBounds();
   testBrightnessMapping();
   testPresetGesture();
+  testButtonAndTouchDispatch();
   testControllerModes();
   testReactiveLightingMath();
   testMusicEnvelope();

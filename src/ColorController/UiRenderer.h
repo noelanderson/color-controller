@@ -3,48 +3,48 @@
 #include <ST77922.h>
 #include <TFT_eSPI.h>
 
-#include "BrightnessSliderControl.h"
 #include "ColorMath.h"
-#include "ColorPreviewControl.h"
-#include "ColorWheelControl.h"
 #include "ControllerModel.h"
-#include "PowerButtonControl.h"
 #include "UiLayout.h"
+#include "UiScene.h"
 
 /**
- * Owns framebuffer rendering state and transfers complete frames to the panel.
+ * Owns framebuffer transfers and supplies consistent render context to UiScene.
  *
  * Construction only binds references; setup must initialize the display and
- * allocate the canvas before any drawing method is called.
+ * allocate the canvas before any drawing method is called. Scene composition,
+ * element geometry, and draw order remain outside this adapter.
  */
 class UiRenderer {
  public:
-  UiRenderer(TFT_eSprite& canvas, ST77922& display, ControllerModel& model, ColorWheelControl& colorWheel,
-             BrightnessSliderControl& brightnessSlider, PowerButtonControl& powerButton,
-             ColorPreviewControl& colorPreview);
+  UiRenderer(TFT_eSprite& canvas, ST77922& display, ControllerModel& model, UiScene& scene);
 
+  /** Transfers the complete framebuffer; the panel driver does not accept partial sprite pushes. */
   void flushDisplay();
-  void drawColorStrip(const RgbColor& effectPreviewColor);
-  void drawControl(uint8_t index);
-  void drawPowerControl();
-  void drawBrightnessControl(const RgbColor& effectPreviewColor);
+  /**
+   * Redraws one registered element without transferring the frame.
+   *
+   * @return false when the ID is absent; the first absence is reported to
+   *         Serial so composition errors cannot fail silently.
+   */
+  bool drawElement(UiElementId id, const RgbColor& effectPreviewColor);
+  /**
+   * Delivers element-local state without transferring the frame.
+   *
+   * @return false when the target ID is not registered.
+   */
+  bool notifyElement(UiElementId id, const UiNotification& notification);
+  /** Redraws all dynamic scene content and transfers the complete frame. */
   void drawDynamicUi(const RgbColor& effectPreviewColor);
+  /** Clears the framebuffer, performs initial scene drawing, and transfers the frame. */
   void drawInitialUi(const RgbColor& effectPreviewColor);
 
-  /** Displays and later expires the transient SAVED preset label. */
-  void showPresetSaved(uint8_t index, uint32_t until);
-  void expireSavedPreset(uint32_t now);
-
  private:
-  void drawControls();
+  UiRenderContext context(const RgbColor& effectPreviewColor) const;
 
   TFT_eSprite& canvas_;
   ST77922& display_;
   ControllerModel& model_;
-  ColorWheelControl& colorWheel_;
-  BrightnessSliderControl& brightnessSlider_;
-  PowerButtonControl& powerButton_;
-  ColorPreviewControl& colorPreview_;
-  int8_t savedPreset_ = -1;
-  uint32_t savedFeedbackUntil_ = 0;
+  UiScene& scene_;
+  bool missingElementReported_ = false;
 };

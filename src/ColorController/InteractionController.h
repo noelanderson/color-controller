@@ -2,74 +2,28 @@
 
 #include <ST77922_Touch.h>
 
-#include "BrightnessSliderControl.h"
-#include "ColorPersistenceService.h"
-#include "ColorWheelControl.h"
-#include "ControllerModel.h"
-#include "LightingOutput.h"
-#include "PowerButtonControl.h"
-#include "PresetGesture.h"
-#include "UiRenderer.h"
+#include "InteractiveControls.h"
+#include "TouchDispatcher.h"
+#include "UiActionProcessor.h"
 
 /**
- * Translates raw touch samples into model updates and coordinated output/UI
- * changes. poll() is called by the touch coroutine at a fixed cadence.
+ * Reads the touch hardware and feeds normalized samples into the dispatcher.
+ *
+ * This is the sole owner allowed to sample ST77922_TOUCH. poll() is called by
+ * the single touch coroutine at a fixed cadence, preventing competing readers
+ * from observing inconsistent controller state.
  */
 class InteractionController {
  public:
-  InteractionController(ST77922_TOUCH& touch, ControllerModel& model, LightingOutput& lighting,
-                        UiRenderer& renderer, ColorPersistenceService& persistence,
-                        const ColorWheelControl& colorWheel, const BrightnessSliderControl& brightnessSlider,
-                        const PowerButtonControl& powerButton);
+  /** Binds non-owning references; all collaborators must outlive the controller. */
+  InteractionController(ST77922_TOUCH& touch, InteractiveControls& controls,
+                        UiActionProcessor& actionProcessor);
 
+  /** Reads one hardware sample, dispatches it, and advances timed controls. */
   void poll(uint32_t now);
 
  private:
-  enum class TouchTarget : uint8_t {
-    kNone,
-    kWheel,
-    kPreset,
-    kPower,
-    kBrightness,
-  };
-
-  enum class ContactState : uint8_t {
-    kIdle,
-    kPressed,
-    kReleaseDebouncing,
-  };
-
-  struct TouchState {
-    TouchTarget target = TouchTarget::kNone;
-    uint8_t presetIndex = 0;
-    int16_t lastX = 0;
-    int16_t lastY = 0;
-  };
-
-  TouchTarget identifyTarget(int16_t x, int16_t y, uint8_t& presetIndex);
-  void selectWheelColor(int16_t x, int16_t y);
-  void setBrightnessFromTouch(int16_t x);
-  void handleTouchDown(int16_t x, int16_t y, uint32_t now);
-  void handleTouchMove(int16_t x, int16_t y);
-  void updatePresetHold(uint32_t now);
-  void handleTouchUp();
-  void handlePresetRelease();
-  void recallPreset(uint8_t index);
-  void activateMode(OutputMode mode);
-  void handlePowerRelease();
-  void handleTouchSample(uint32_t now);
-  void handleNoTouch();
-
   ST77922_TOUCH& touch_;
-  ControllerModel& model_;
-  LightingOutput& lighting_;
-  UiRenderer& renderer_;
-  ColorPersistenceService& persistence_;
-  const ColorWheelControl& colorWheel_;
-  const BrightnessSliderControl& brightnessSlider_;
-  const PowerButtonControl& powerButton_;
-  TouchState touchState_;
-  PresetGesture presetGesture_;
-  ContactState contactState_ = ContactState::kIdle;
-  uint8_t noTouchPolls_ = 0;
+  UiActionProcessor& actionProcessor_;
+  TouchDispatcher dispatcher_;
 };

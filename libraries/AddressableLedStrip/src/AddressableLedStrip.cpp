@@ -26,6 +26,9 @@ AddressableLedStrip::~AddressableLedStrip() {
 }
 
 bool AddressableLedStrip::begin() {
+  if (ready_) {
+    return true;
+  }
   if (pixelCount_ == 0) {
     ready_ = true;
     return true;
@@ -69,15 +72,16 @@ void AddressableLedStrip::clear() {
   symbols_[symbolCount_ - 1].duration1 = 1;
 }
 
-void AddressableLedStrip::setPixel(uint16_t index, const RgbColor& color, uint8_t brightness) {
+void AddressableLedStrip::setPixel(uint16_t index, uint8_t red, uint8_t green, uint8_t blue,
+                                   uint8_t brightness) {
   if (!ready_ || symbols_ == nullptr || index >= pixelCount_) {
     return;
   }
 
   size_t symbolIndex = static_cast<size_t>(index) * kBitsPerPixel;
-  encodeByte(symbolIndex, applyBrightness(color.green, brightness));
-  encodeByte(symbolIndex, applyBrightness(color.red, brightness));
-  encodeByte(symbolIndex, applyBrightness(color.blue, brightness));
+  encodeByte(symbolIndex, applyBrightness(green, brightness));
+  encodeByte(symbolIndex, applyBrightness(red, brightness));
+  encodeByte(symbolIndex, applyBrightness(blue, brightness));
 }
 
 bool AddressableLedStrip::show() {

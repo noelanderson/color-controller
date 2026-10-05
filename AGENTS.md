@@ -57,6 +57,9 @@ the existing hardware behavior unless the task explicitly requires a change.
     `AwaitConfig.h`, never `<SimpleAwait.h>` directly, so every translation unit
     uses the same scheduler capacity, frame pool, and error hook.
 15. Do not commit generated files from `build/` or local executables.
+16. Keep interactive UI elements spatially disjoint. Treat overlapping touch
+    regions as a layout defect rather than relying on registration order to
+    choose which control receives a contact.
 
 ## Validation
 
