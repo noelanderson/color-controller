@@ -3,14 +3,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/**
+ * @file UiLayout.h
+ * @brief Shared framebuffer dimensions, drawing metrics, and RGB565 theme tokens.
+ *
+ * Control objects receive their screen placement from the sketch composition
+ * root. This file contains only reusable drawing measurements and colors, so a
+ * control's implementation never depends on another control's location.
+ */
+
 namespace Ui {
 
-// Framebuffer geometry.
+/** Landscape framebuffer geometry required by display rotation 1. */
 constexpr int16_t kWidth = 480;
 constexpr int16_t kHeight = 320;
 constexpr uint8_t kFramebufferColorDepth = 16;
 
-// Color-wheel selection marker.
+/** Marker radii include the erase footprint needed when the marker crosses the wheel edge. */
 constexpr int16_t kWheelMarkerRadius = 6;
 constexpr int16_t kWheelMarkerOutlineRadius = 7;
 constexpr int16_t kWheelMarkerRestoreRadius = 8;

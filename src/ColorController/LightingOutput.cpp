@@ -1,5 +1,14 @@
 #include "LightingOutput.h"
 
+/**
+ * @file LightingOutput.cpp
+ * @brief Converts controller state and live audio amplitude into physical LED frames.
+ *
+ * Runtime calls originate only from the lighting coroutine. The adapter owns
+ * strip transports and reactive envelope state, while ControllerModel remains
+ * the authoritative source for power, mode, color, and user brightness.
+ */
+
 #include <Arduino.h>
 
 #include "AudioFeedback.h"
@@ -38,6 +47,8 @@ void LightingOutput::writeRainbowPixels(AddressableLedStrip& pixels, uint32_t no
 void LightingOutput::apply() { apply(millis()); }
 
 void LightingOutput::apply(uint32_t now) {
+  // Power-off is an output policy, not a model reset. Writing black preserves
+  // the selected color, brightness, mode, and effect phase for the next toggle.
   if (!model_.powerOn()) {
     writeSolidPixels(onboardPixels_, {0, 0, 0}, 0);
     if (Config::kExternalPixelCount > 0) {
@@ -47,6 +58,8 @@ void LightingOutput::apply(uint32_t now) {
   }
 
   if (model_.mode() == OutputMode::kRainbow) {
+    // Hue is derived from absolute rollover-safe time; missed frames therefore
+    // skip forward instead of slowing the animation or accumulating drift.
     const uint8_t brightness =
         scaleBrightness(model_.brightness(), breathingIntensity(now, Config::kRainbowBreathMs));
     previewColor_ = rainbowColor(now, Config::kRainbowCycleMs, 0, 1);
@@ -59,6 +72,8 @@ void LightingOutput::apply(uint32_t now) {
 
   if (model_.mode() == OutputMode::kMusic) {
     uint16_t magnitude = 0;
+    // AudioFeedback returns only a newly published amplitude. If no sample is
+    // ready, the envelope naturally releases from its previous value.
     if (AudioFeedback::readMicrophoneLevel(magnitude)) {
       musicEnvelope_.update(magnitude);
     }
@@ -73,6 +88,8 @@ void LightingOutput::apply(uint32_t now) {
     return;
   }
 
+  // Solid mode bypasses effect math and mirrors the stable selected color in
+  // previewColor_, keeping UI and physical output sourced from the same frame.
   previewColor_ = model_.selected();
   writeSolidPixels(onboardPixels_, model_.selected(), model_.brightness());
   if (Config::kExternalPixelCount > 0) {

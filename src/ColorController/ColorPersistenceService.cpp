@@ -1,5 +1,14 @@
 #include "ColorPersistenceService.h"
 
+/**
+ * @file ColorPersistenceService.cpp
+ * @brief Applies delayed-save and retry policy around the Preferences adapter.
+ *
+ * The persistence coroutine is the sole runtime caller. A returned preset bit
+ * means the desired value is durable (or already identical in NVS); callers
+ * must not display SAVED before receiving that bit.
+ */
+
 #include <Arduino.h>
 
 #include "Config.h"
@@ -23,6 +32,9 @@ void ColorPersistenceService::queuePresetSave(uint8_t index, const RgbColor& col
 
 uint8_t ColorPersistenceService::process(uint32_t now, const ControllerModel& model) {
   uint8_t savedPresetMask = 0;
+  // Each preset retries independently. One unavailable key cannot delay writes
+  // for the other slots, and signed deadline comparison is rollover-safe for
+  // the bounded retry interval.
   for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
     if (!pendingPresetSaves_[index] || static_cast<int32_t>(now - presetSaveRetryAt_[index]) < 0) {
       continue;
@@ -36,6 +48,8 @@ uint8_t ColorPersistenceService::process(uint32_t now, const ControllerModel& mo
     }
   }
 
+  // Manual color persistence is intentionally delayed to protect flash during
+  // wheel drags. Effect entry cancels the candidate before this point.
   if (!manualColorSave_.ready(now, Config::kManualColorSaveDelayMs)) {
     return savedPresetMask;
   }

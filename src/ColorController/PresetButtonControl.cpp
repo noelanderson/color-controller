@@ -1,5 +1,10 @@
 #include "PresetButtonControl.h"
 
+/**
+ * @file PresetButtonControl.cpp
+ * @brief Short-press recall, hold-to-store, and durable-save feedback rendering.
+ */
+
 #include <Arduino.h>
 
 #include "Config.h"
@@ -18,6 +23,9 @@ UiAction PresetButtonControl::onPress(const TouchEvent& event) {
 
 UiAction PresetButtonControl::onMove(const TouchEvent& event, bool inside) {
   touchInside_ = inside;
+  // Movement and tick both advance the same one-shot gesture state. This lets
+  // a stationary hold fire without generating a second store when movement
+  // resumes.
   if (gesture_.update(event.now, inside, Config::kPresetHoldMs) == PresetGestureEvent::kStore) {
     return UiAction::preset(UiActionType::kStorePreset, index_);
   }
@@ -44,6 +52,8 @@ UiAction PresetButtonControl::tick(uint32_t now) {
 }
 
 void PresetButtonControl::notify(const UiNotification& notification) {
+  // This notification is emitted only after PersistentState confirms NVS
+  // success; press/hold recognition alone must never display SAVED.
   if (notification.type == UiNotificationType::kPresetSaved) {
     savedUntil_ = notification.until;
     savedVisible_ = true;
@@ -64,6 +74,8 @@ void PresetButtonControl::draw(const UiRenderContext& context) {
   canvas_.drawRoundRect(x(), y(), width(), height(), Ui::kControlCornerRadius, Ui::kWhite);
 
   char label[Ui::kPresetLabelBufferSize];
+  // Signed subtraction keeps the deadline comparison valid across millis()
+  // rollover for feedback intervals shorter than half the counter range.
   const bool saved = savedVisible_ && static_cast<int32_t>(context.now - savedUntil_) < 0;
   if (saved) {
     snprintf(label, sizeof(label), "SAVED");

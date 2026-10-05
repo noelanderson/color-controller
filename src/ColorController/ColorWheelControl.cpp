@@ -1,5 +1,13 @@
 #include "ColorWheelControl.h"
 
+/**
+ * @file ColorWheelControl.cpp
+ * @brief Procedural color-wheel rendering, hit testing, and marker repair.
+ *
+ * The wheel bitmap is not cached separately. Dynamic draws restore only the
+ * previous marker footprint by rerunning the same coordinate-to-color mapping.
+ */
+
 #include <math.h>
 
 #include "UiDrawing.h"
@@ -37,6 +45,8 @@ void ColorWheelControl::drawInitial(const UiRenderContext& context) {
 void ColorWheelControl::draw(const UiRenderContext& context) { drawMarker(context.model.selected()); }
 
 void ColorWheelControl::drawWheel() {
+  // Inclusive bounds ensure the four cardinal edge pixels are considered;
+  // colorAt() rejects square-corner pixels outside the circular wheel.
   for (int16_t y = layout_.bounds.centerY - layout_.bounds.radius;
        y <= layout_.bounds.centerY + layout_.bounds.radius; ++y) {
     for (int16_t x = layout_.bounds.centerX - layout_.bounds.radius;
@@ -51,6 +61,7 @@ void ColorWheelControl::drawWheel() {
 }
 
 void ColorWheelControl::drawMarker(const RgbColor& selectedColor) {
+  // Repair first while markerX_/markerY_ still identify the old footprint.
   restoreMarkerBackground();
 
   const HsvColor hsv = rgbToHsv(selectedColor);
@@ -59,6 +70,7 @@ void ColorWheelControl::drawMarker(const RgbColor& selectedColor) {
   markerX_ = layout_.bounds.centerX + lroundf(cosf(angle) * distance);
   markerY_ = layout_.bounds.centerY + lroundf(sinf(angle) * distance);
 
+  // Pick an outline with useful contrast at both white center and dark hues.
   const uint16_t outline =
       (selectedColor.red + selectedColor.green + selectedColor.blue) > Ui::kMarkerLightColorThreshold
           ? Ui::kBlack

@@ -1,5 +1,10 @@
 #include "ColorPreviewControl.h"
 
+/**
+ * @file ColorPreviewControl.cpp
+ * @brief Compact renderer for the current solid or live effect color.
+ */
+
 #include "UiDrawing.h"
 #include "UiLayout.h"
 

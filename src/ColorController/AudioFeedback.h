@@ -10,6 +10,8 @@
  *
  * The service owns the codec device handle, I2S channels, audio task, and
  * fixed-size tone/microphone buffers. Callers never block on playback or input.
+ * Cue requests coalesce in ControllerMessages; microphone delivery is a
+ * destructive latest-value read rather than a historical sample stream.
  */
 namespace AudioFeedback {
 
@@ -38,8 +40,8 @@ MicrophoneStatus microphoneStatus();
  * Takes the latest amplitude sample published by the audio coroutine.
  *
  * @param magnitude Receives the mean absolute sample magnitude on success.
- * @return true when a complete input block was available; false leaves
- *         magnitude unchanged.
+ * @return true when a newer amplitude was published since the previous
+ *         successful read; false leaves magnitude unchanged.
  */
 bool readMicrophoneLevel(uint16_t& magnitude);
 

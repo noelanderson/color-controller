@@ -1,5 +1,10 @@
 #include "ModeButtonControl.h"
 
+/**
+ * @file ModeButtonControl.cpp
+ * @brief Rainbow/music mode actions, glyphs, and active-state rendering.
+ */
+
 #include <Arduino.h>
 
 #include "ColorMath.h"
@@ -16,6 +21,8 @@ UiAction ModeButtonControl::onRelease(const TouchEvent&, bool releasedInside) {
 
 void ModeButtonControl::draw(const UiRenderContext& context) {
   const bool active = context.model.mode() == mode_;
+  // Only non-solid modes are composed with this class. Treating the second
+  // branch as music keeps glyph selection independent of button placement.
   if (mode_ == OutputMode::kRainbow) {
     drawRainbow(active);
   } else {

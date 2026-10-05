@@ -1,5 +1,10 @@
 #include "BrightnessSliderControl.h"
 
+/**
+ * @file BrightnessSliderControl.cpp
+ * @brief Slider hit mapping and dynamic brightness rendering.
+ */
+
 #include <Arduino.h>
 
 #include "UiDrawing.h"
@@ -45,6 +50,8 @@ void BrightnessSliderControl::draw(const UiRenderContext& context) {
   canvas_.fillRoundRect(layout_.startX, layout_.y - Ui::kSliderTrackHalfHeight,
                         layout_.endX - layout_.startX, Ui::kSliderTrackHeight,
                         Ui::kSliderTrackCornerRadius, Ui::kMuted);
+  // Match brightnessAt() with the inverse integer mapping so redraws do not
+  // make the knob jump relative to the value selected by a drag.
   const int16_t knobX = layout_.startX +
                         static_cast<int32_t>(brightness) * (layout_.endX - layout_.startX) / UINT8_MAX;
   canvas_.fillCircle(knobX, layout_.y, Ui::kSliderKnobRadius,

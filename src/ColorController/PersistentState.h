@@ -7,7 +7,9 @@
 /**
  * Stores presets and the stable manual color in the ESP32 Preferences/NVS partition.
  *
- * Cached packed values suppress writes that would needlessly consume flash endurance.
+ * Cached packed values suppress writes that would needlessly consume flash
+ * endurance. 0xFFFFFFFF is reserved as the missing-value sentinel because
+ * valid colors occupy only 0x00RRGGBB.
  */
 class PersistentState {
  public:

@@ -1,5 +1,10 @@
 #include "PowerButtonControl.h"
 
+/**
+ * @file PowerButtonControl.cpp
+ * @brief Power-toggle action and state-dependent call-to-action rendering.
+ */
+
 #include "UiDrawing.h"
 #include "UiLayout.h"
 
@@ -12,6 +17,7 @@ UiAction PowerButtonControl::onRelease(const TouchEvent&, bool releasedInside) {
 
 void PowerButtonControl::draw(const UiRenderContext& context) {
   const bool powerOn = context.model.powerOn();
+  // The label describes the action a tap will perform, not the current state.
   const uint16_t fill = powerOn ? Ui::kRed : Ui::kGreen;
   canvas_.fillRoundRect(x(), y(), width(), height(), Ui::kPowerCornerRadius, fill);
   canvas_.drawRoundRect(x(), y(), width(), height(), Ui::kPowerCornerRadius, Ui::kWhite);

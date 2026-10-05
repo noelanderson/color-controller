@@ -1,3 +1,13 @@
+/**
+ * @file ColorController.ino
+ * @brief Hardware composition root and fixed-memory coroutine wiring.
+ *
+ * setup() initializes every hardware service before spawning runtime tasks.
+ * loop() delegates exclusively to SimpleAwait. Steady-state model mutation,
+ * LED output, framebuffer transfers, persistence, and audio each have one
+ * coroutine owner connected by a bounded action queue and coalesced mailboxes.
+ */
+
 #include <Arduino.h>
 #include <ST77922.h>
 #include <ST77922_Touch.h>
@@ -78,6 +88,14 @@ ColorPersistenceService persistenceService;
 UiActionProcessor uiActionProcessor(model, controllerMessages);
 InteractionController interactionController(touch, interactiveControls);
 
+/**
+ * Registers the independently composed controls with input and drawing collections.
+ *
+ * Registration is transactional at startup: a false result prevents runtime
+ * tasks from starting and leaves the diagnostic framebuffer visible.
+ *
+ * @return true when every interactive and drawable element fits its fixed collection.
+ */
 bool configureUserInterface() {
   interactiveControls.clear();
   uiScene.clear();
@@ -110,6 +128,13 @@ bool configureUserInterface() {
   return inputReady && sceneReady;
 }
 
+/**
+ * Sole touch-hardware reader and producer for the semantic action FIFO.
+ *
+ * Up to two actions may result from one sample: a contact transition and a
+ * time-driven control event. Queue send is intentionally awaited so a full
+ * queue applies backpressure instead of silently dropping a user command.
+ */
 simpleawait::Task<void> monitorTouchInput() {
   while (true) {
     const uint32_t now = millis();
@@ -127,6 +152,13 @@ simpleawait::Task<void> monitorTouchInput() {
   }
 }
 
+/**
+ * Sole steady-state writer of ControllerModel.
+ *
+ * Startup restoration completes before this task is created. Each received
+ * action is applied atomically within one scheduler resume, after which typed
+ * side-effect messages are available to their owning service tasks.
+ */
 simpleawait::Task<void> processUiActions() {
   while (true) {
     const UiAction action = co_await uiActionQueue.receive();
@@ -134,6 +166,13 @@ simpleawait::Task<void> processUiActions() {
   }
 }
 
+/**
+ * Sole runtime owner of physical LED writes and reactive-lighting state.
+ *
+ * Solid-state changes are coalesced until this 25 ms task runs. Effect modes
+ * render every frame. UI invalidations attached to a lighting request are
+ * published only after previewColor() and the strips reflect the new model.
+ */
 simpleawait::Task<void> updateLighting() {
   while (true) {
     co_await simpleawait::delay_ms(Config::kEffectFrameMs);
@@ -150,6 +189,14 @@ simpleawait::Task<void> updateLighting() {
   }
 }
 
+/**
+ * Sole runtime owner of UiRenderer and framebuffer transfers.
+ *
+ * Mailbox work is serviced at the responsive UI cadence, while effect preview
+ * updates are rate-limited independently. Dirty bits coalesce multiple changes
+ * into one framebuffer transfer. Confirmed preset-save notifications are
+ * applied before drawing so SAVED and its expiry remain element-local state.
+ */
 simpleawait::Task<void> updateEffectUi() {
   AudioFeedback::MicrophoneStatus displayedMicrophoneStatus =
       AudioFeedback::MicrophoneStatus::kInitializing;
@@ -214,6 +261,12 @@ simpleawait::Task<void> updateEffectUi() {
   }
 }
 
+/**
+ * Sole runtime owner of persistence policy and NVS writes.
+ *
+ * The task drains latest-value mailbox state, advances delayed/manual and retry
+ * policies, and publishes SAVED only for preset bits reported durable by NVS.
+ */
 simpleawait::Task<void> persistStableManualColor() {
   while (true) {
     co_await simpleawait::delay_ms(Config::kPersistencePollMs);
@@ -239,6 +292,8 @@ simpleawait::Task<void> persistStableManualColor() {
 }
 
 simpleawait::Task<void> reportFramebufferFailure() {
+  // Fatal reporters keep loop() scheduler-only and suspend positively between
+  // messages, preserving idle time even when normal runtime cannot start.
   while (true) {
     Serial.println("FATAL: unable to allocate the display framebuffer");
     co_await simpleawait::delay_ms(Config::kFatalReportMs);
@@ -260,6 +315,8 @@ simpleawait::Task<void> reportUiConfigurationFailure() {
 }
 
 bool startControllerTask(simpleawait::Task<void>&& task, const char* name) {
+  // Task creation can fail because the fixed slot table or frame pool is
+  // exhausted. Report it synchronously while Serial is known to be available.
   const simpleawait::TaskHandle handle =
       simpleawait::create_task(static_cast<simpleawait::Task<void>&&>(task));
   if (handle.valid()) {
@@ -270,6 +327,10 @@ bool startControllerTask(simpleawait::Task<void>&& task, const char* name) {
 }
 
 void setup() {
+  // Initialization order is a dependency graph:
+  // display -> restored model -> framebuffer/UI -> first output/frame ->
+  // touch/shared I2C -> runtime tasks -> audio device on the shared bus.
+  // No global constructor accesses hardware.
   Serial.begin(Config::kSerialBaud);
 
   if (!display.begin()) {
@@ -278,6 +339,8 @@ void setup() {
   }
   display.Set_Rotation(Config::kDisplayRotation);
 
+  // Storage is optional at boot. Defaults remain valid and later persistence
+  // attempts surface failures without preventing the controller from running.
   if (!persistenceService.begin(model)) {
     Serial.println("WARNING: persistent color storage unavailable");
   }
@@ -294,6 +357,8 @@ void setup() {
     return;
   }
 
+  // Render and illuminate a complete initial state before exposing touch input
+  // or turning on the panel backlight, avoiding a partially drawn startup UI.
   lightingOutput.begin();
   lightingOutput.apply();
   uiRenderer.drawInitialUi(lightingOutput.previewColor());
@@ -304,6 +369,9 @@ void setup() {
   }
   touch.Set_Rotation(Config::kDisplayRotation);
 
+  // All state and hardware referenced by these tasks are now ready. Each call
+  // reports its own fixed-resource failure; successfully created tasks remain
+  // independently schedulable if another optional service cannot start.
   startControllerTask(monitorTouchInput(), "touch input");
   startControllerTask(processUiActions(), "UI actions");
   startControllerTask(updateLighting(), "LED effects");
@@ -315,5 +383,8 @@ void setup() {
 }
 
 void loop() {
+  // poll_and_wait() runs ready coroutines, then blocks the Arduino loop task
+  // until a timer or cross-coroutine event is due. Application work must not be
+  // added here because a permanently-ready loop would defeat scheduler idle.
   simpleawait::poll_and_wait();
 }

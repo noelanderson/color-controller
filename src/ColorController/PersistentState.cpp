@@ -1,5 +1,14 @@
 #include "PersistentState.h"
 
+/**
+ * @file PersistentState.cpp
+ * @brief Preferences/NVS encoding, startup restoration, and write deduplication.
+ *
+ * RGB values use a stable 24-bit representation rather than object layout.
+ * Cached packed values suppress unchanged flash writes. This adapter owns its
+ * Preferences namespace but never owns or closes the surrounding NVS service.
+ */
+
 #include "PersistencePolicy.h"
 
 namespace {
@@ -21,6 +30,8 @@ bool isPackedColor(uint32_t packed) {
 }  // namespace
 
 bool PersistentState::begin(ControllerModel& model) {
+  // Startup restoration is the only model mutation outside the application
+  // coroutine. setup() completes this call before any runtime task is spawned.
   ready_ = preferences_.begin(kNamespace, false);
   if (!ready_) {
     return false;
@@ -32,6 +43,8 @@ bool PersistentState::begin(ControllerModel& model) {
       model.setPreset(index, unpackColor(packed));
       savedPresets_[index] = packed;
     } else {
+      // Cache the usable firmware default so a later request for the same value
+      // is treated as already synchronized rather than causing a repair write.
       savedPresets_[index] = packColor(model.preset(index));
     }
   }

@@ -1,5 +1,16 @@
 #include "AudioFeedback.h"
 
+/**
+ * @file AudioFeedback.cpp
+ * @brief Exclusive ES8311/I2S owner for microphone sampling and feedback tones.
+ *
+ * All codec and I2S access occurs in the audio coroutine after setup has
+ * initialized the shared touch I2C bus. Feedback uses a complete preloaded DMA
+ * waveform, avoiding scheduler jitter and TX underrun artifacts. Microphone
+ * samples use latest-value semantics because old amplitude data has no value to
+ * a real-time lighting effect.
+ */
+
 #include <Arduino.h>
 #include <math.h>
 
@@ -27,6 +38,7 @@ bool microphoneSamplePending = false;
 MicrophoneStatus currentMicrophoneStatus = MicrophoneStatus::kInitializing;
 int16_t toneBuffer[kToneFrames * kStereoChannelCount] = {};
 
+/** Releases only I2S channels owned by this module; the shared I2C bus remains external. */
 void releaseI2sChannels() {
   if (txChannel != nullptr) {
     i2s_del_channel(txChannel);
@@ -40,6 +52,9 @@ void releaseI2sChannels() {
 
 bool beginI2s() {
   i2s_chan_config_t chanConfig = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+  // Eight 64-frame descriptors hold the complete 30 ms stereo tone before TX
+  // starts. RX shares the channel configuration and benefits from the same
+  // bounded DMA depth without allocating application heap buffers.
   chanConfig.dma_desc_num = 8;
   chanConfig.dma_frame_num = Config::kAudioDmaFrames;
   // TX must fall back to silence if the cooperative producer misses a DMA
@@ -65,8 +80,9 @@ bool beginI2s() {
   };
   stdConfig.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_384;
 
-  // The first initialized channel owns BCLK/WS in an IDF full-duplex pair.
-  // RX remains enabled continuously, so it must be the clock master.
+  // The first initialized channel owns BCLK/WS in an IDF full-duplex pair. RX
+  // remains enabled continuously for music mode, so it must be initialized
+  // first and act as the clock owner even while TX is disabled between cues.
   if (i2s_channel_init_std_mode(rxChannel, &stdConfig) != ESP_OK ||
       i2s_channel_init_std_mode(txChannel, &stdConfig) != ESP_OK) {
     releaseI2sChannels();
@@ -85,6 +101,8 @@ void prepareToneBuffer() {
   const float angularStep =
       kTwoPi * Config::kAudioBeepFrequencyHz / static_cast<float>(Config::kAudioSampleRate);
 
+  // Build once after hardware initialization. Keeping the 1.9 KB waveform in
+  // static storage avoids placing it in a coroutine frame or allocating heap.
   for (uint32_t sampleIndex = 0; sampleIndex < kToneFrames; ++sampleIndex) {
     float envelope = 1.0f;
     if (sampleIndex < fadeSamples) {
@@ -106,6 +124,8 @@ simpleawait::Task<void> playTone() {
     co_return;
   }
 
+  // Preloading while the channel is READY makes the first transmitted frame
+  // valid audio. Enabling an empty channel would emit or repeat stale DMA data.
   size_t bytesLoaded = 0;
   const esp_err_t preloadResult =
       i2s_channel_preload_data(txChannel, toneBuffer, sizeof(toneBuffer), &bytesLoaded);
@@ -123,6 +143,9 @@ simpleawait::Task<void> playTone() {
     co_return;
   }
 
+  // Delay by the duration actually accepted by DMA, not the requested buffer
+  // size. This also gives a deterministic short cue if a future DMA capacity
+  // change causes a partial preload.
   const uint32_t loadedFrames =
       bytesLoaded / (kStereoChannelCount * sizeof(toneBuffer[0]));
   const uint32_t playbackMs =
@@ -143,6 +166,9 @@ bool sampleMicrophone(uint16_t& magnitude) {
   int16_t samples[Config::kAudioDmaFrames * kStereoChannelCount];
   uint64_t total = 0;
   size_t totalSamples = 0;
+  // Drain every currently available RX block without waiting. The accumulated
+  // mean absolute value represents one audio-service sample; no stale block is
+  // left queued to distort the next lighting frame.
   while (true) {
     size_t bytesRead = 0;
     const esp_err_t result = i2s_channel_read(rxChannel, samples, sizeof(samples), &bytesRead, 0);
@@ -167,6 +193,8 @@ bool sampleMicrophone(uint16_t& magnitude) {
 }
 
 simpleawait::Task<void> service(i2c_master_bus_handle_t touchBus, ControllerMessages& messages) {
+  // GPIO and codec calls are intentionally delayed until coroutine execution;
+  // global constructors in this module initialize data only.
   pinMode(Config::kAudioEnablePin, OUTPUT);
   digitalWrite(Config::kAudioEnablePin, LOW);
 
@@ -208,12 +236,17 @@ simpleawait::Task<void> service(i2c_master_bus_handle_t touchBus, ControllerMess
   prepareToneBuffer();
 
   while (true) {
+    // Publish only the newest amplitude. Lighting consumes at 25 ms while RX is
+    // sampled at 5 ms, so a FIFO would create latency rather than information.
     uint16_t magnitude = 0;
     if (sampleMicrophone(magnitude)) {
       latestMicrophoneMagnitude = magnitude;
       microphoneSamplePending = true;
     }
 
+    // Audio cues coalesce by priority in ControllerMessages. Playback is a
+    // child coroutine so the service retains codec ownership while the parent
+    // suspends and all unrelated controller tasks continue running.
     const AudioCue cue = messages.takeAudio();
     if (cue == AudioCue::kNone) {
       co_await simpleawait::delay_ms(Config::kAudioServicePollMs);

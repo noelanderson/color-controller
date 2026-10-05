@@ -9,6 +9,8 @@
  * Drives onboard and optional external addressable LEDs for every output mode.
  *
  * The constructor is hardware-safe; begin() performs GPIO initialization.
+ * One lighting coroutine owns all runtime calls, including the adaptive music
+ * envelope and the preview color consumed by the UI coroutine.
  */
 class LightingOutput {
  public:
