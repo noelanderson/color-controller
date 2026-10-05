@@ -32,7 +32,9 @@ jobs:
         run: choco install doxygen.install --yes --no-progress
 
       - name: Generate firmware reference
-        run: doxygen Doxyfile
+        run: |
+          New-Item -ItemType Directory -Force "build\doxygen" | Out-Null
+          doxygen Doxyfile
 
       - name: Require warning-free output
         run: |
