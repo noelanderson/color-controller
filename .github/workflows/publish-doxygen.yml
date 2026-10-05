@@ -22,27 +22,27 @@ concurrency:
 jobs:
   build:
     name: Build Doxygen HTML
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
       - name: Install Doxygen
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends doxygen
+        run: choco install doxygen.install --yes --no-progress
 
       - name: Generate firmware reference
         run: doxygen Doxyfile
 
       - name: Require warning-free output
         run: |
-          test -s build/doxygen/html/index.html
-          if test -s build/doxygen/warnings.log; then
-            cat build/doxygen/warnings.log >&2
-            exit 1
-          fi
+          if (-not (Test-Path "build\doxygen\html\index.html")) {
+            throw "Doxygen did not generate build\doxygen\html\index.html"
+          }
+          if ((Get-Item "build\doxygen\warnings.log").Length -ne 0) {
+            Get-Content "build\doxygen\warnings.log"
+            throw "Doxygen generated documentation warnings"
+          }
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
