@@ -100,7 +100,8 @@ driver transfers that framebuffer to the QSPI display.
 ### Dependencies
 
 - **Internal:** Supplied `ST77922` and `ST77922_Touch` board drivers in the resource pack.
-- **External:** ESP32 Arduino core 3.3.x, TFT_eSPI 2.5.x, and SimpleAwait 1.0.1.
+- **External:** ESP32 Arduino core 3.3.x, TFT_eSPI 2.5.x, and SimpleAwait merged
+  commit `765b418` (package metadata 1.0.1).
 - **Hardware:** Elecrow DLE06235B, onboard addressable LED on GPIO 40, ES8311 analog
   microphone input on I2S GPIO 16, and optional external signal on P2 GPIO 45.
 
@@ -109,7 +110,7 @@ driver transfers that framebuffer to the QSPI display.
 - [x] Compile for `esp32:esp32:esp32s3` with 16 MB flash and OPI PSRAM enabled.
 - [x] Use display and touch rotation 1 so both coordinate systems are 480x320.
 - [x] Allocate the 16-bit framebuffer in PSRAM and fail visibly over Serial if allocation fails.
-- [x] Keep the main loop limited to `simpleawait::poll()`.
+- [x] Keep the main loop limited to `simpleawait::poll_and_wait()`.
 - [x] Use SimpleAwait delay primitives instead of application-level blocking
   delay calls.
 - [x] Clamp all touch coordinates and computed values to valid ranges.
@@ -228,7 +229,7 @@ driver transfers that framebuffer to the QSPI display.
   solid color from ESP32 Preferences/NVS at startup.
 - [COMPLETED] Step 7.2 - Persist preset changes immediately while deduplicating
   unchanged flash writes.
-- [COMPLETED] Step 7.3 - Vendor SimpleAwait 1.0.1 and run a fixed-memory C++20
+- [COMPLETED] Step 7.3 - Vendor SimpleAwait commit `765b418` and run a fixed-memory C++20
   coroutine that saves a manually selected color after 120 unchanged seconds.
 - [COMPLETED] Step 7.4 - Cancel pending color persistence on rainbow/music entry
   and preserve NVS during policy-safe segmented firmware uploads.

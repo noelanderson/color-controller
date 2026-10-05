@@ -237,5 +237,5 @@ void setup() {
 }
 
 void loop() {
-  simpleawait::poll();
+  simpleawait::poll_and_wait();
 }

@@ -32,7 +32,7 @@ the existing hardware behavior unless the task explicitly requires a change.
    behavior as hardware constraints. Do not change them without documenting the
    reason and impact.
 8. Update tests and user-facing documentation when behavior or setup changes.
-9. Keep Arduino `loop()` limited to `simpleawait::poll()`. Put touch handling,
+9. Keep Arduino `loop()` limited to `simpleawait::poll_and_wait()`. Put touch handling,
    effects, UI refreshes, persistence, audio sequencing, and other runtime work
    in fixed-memory SimpleAwait tasks. Steady-state task loops must suspend with
    a positive-duration wait; do not use `simpleawait::yield()`,
@@ -41,9 +41,10 @@ the existing hardware behavior unless the task explicitly requires a change.
    application runtime code. Express waits with
    `co_await simpleawait::delay_ms()` or another SimpleAwait primitive. The
    ST77922 touch driver's two startup-only reset delays are hardware-mandated
-   vendor timing and must remain. The vendored SimpleAwait ESP32 idle hook is
-   the single sanctioned runtime `vTaskDelay()`; it is required for touch
-   responsiveness and must remain when updating the library.
+   vendor timing and must remain. The vendored SimpleAwait event-driven ESP32
+   idle backend is the sanctioned runtime blocking integration. Its one-tick
+   `vTaskDelay()` fallback for states without a timer or external wake source is
+   required for touch responsiveness and must remain when updating the library.
 11. Keep hardware initialization in `setup()`; spawn runtime tasks only after
    the state and hardware they use are ready. Check and report every task
    creation failure.

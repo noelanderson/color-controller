@@ -17,7 +17,7 @@ persistent colors.
 - Microphone-reactive music effect
 - Brightness and non-destructive power controls
 - Optional external WS2812-compatible strip
-- Fixed-memory cooperative scheduling with SimpleAwait
+- Fixed-memory cooperative scheduling with event-driven SimpleAwait idle waiting
 - Explicit, reusable UI composition in the Arduino sketch
 
 ## Using the interface

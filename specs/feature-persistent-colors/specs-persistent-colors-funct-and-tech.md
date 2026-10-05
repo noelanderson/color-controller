@@ -73,7 +73,8 @@ policy every 250 ms and performs the NVS write after 120 seconds.
 ### Dependencies
 
 - **Internal:** `ControllerModel`, `ColorMath`, `Config`, and the main sketch.
-- **External:** ESP32 Preferences/NVS and vendored SimpleAwait 1.0.1.
+- **External:** ESP32 Preferences/NVS and vendored SimpleAwait merged commit
+  `765b418` (package metadata 1.0.1).
 
 ### Technical Requirements
 
@@ -109,8 +110,8 @@ policy every 250 ms and performs the NVS write after 120 seconds.
 
 ### Implementation Guidance
 
-- Pin SimpleAwait to v1.0.1 and vendor it with its MIT license.
-- Keep `loop()` limited to `simpleawait::poll()` and run all periodic work as
+- Pin SimpleAwait to merged commit `765b418` and vendor it with its MIT license.
+- Keep `loop()` limited to `simpleawait::poll_and_wait()` and run all periodic work as
   cooperative tasks.
 - Preserve existing UI and mode transitions.
 
@@ -134,7 +135,7 @@ policy every 250 ms and performs the NVS write after 120 seconds.
 ### Stage 1: Dependency and Design
 
 - [COMPLETED] Step 1.1 - Inspect model transitions and all manual/effect color paths.
-- [COMPLETED] Step 1.2 - Pin and vendor MIT-licensed SimpleAwait 1.0.1.
+- [COMPLETED] Step 1.2 - Pin and vendor MIT-licensed SimpleAwait commit `765b418`.
 - [COMPLETED] Step 1.3 - Define NVS keys, write timing, cancellation, and defaults.
 
 ### Stage 2: Persistence Foundation
@@ -176,9 +177,10 @@ policy every 250 ms and performs the NVS write after 120 seconds.
   were corrected before final validation.
 - The pinned SimpleAwait commit labels its package metadata as 1.0.1 while its
   upstream `version.h` constant remains 1.0.0.
-- The vendored snapshot includes a local ESP32 idle hook that yields one RTOS
-  tick when no coroutine is ready. Without it, a poll-only Arduino loop spins
-  continuously and can starve ESP-IDF driver work such as touch processing.
+- The vendored snapshot uses upstream `poll_and_wait()` to block on a static
+  FreeRTOS semaphore until the next timer or external signal. It retains a
+  one-tick fallback when neither wake source exists so ESP-IDF driver work such
+  as touch processing can continue.
 
 ### Notes for Future Work
 
