@@ -1,0 +1,66 @@
+name: Publish firmware reference
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-doxygen.yml"
+      - "Doxyfile"
+      - "src/ColorController/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Doxygen HTML
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends doxygen
+
+      - name: Generate firmware reference
+        run: doxygen Doxyfile
+
+      - name: Require warning-free output
+        run: |
+          test -s build/doxygen/html/index.html
+          if test -s build/doxygen/warnings.log; then
+            cat build/doxygen/warnings.log >&2
+            exit 1
+          fi
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/doxygen/html
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@v5

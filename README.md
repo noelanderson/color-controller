@@ -1,5 +1,8 @@
 # Touch Color Controller
 
+[![Build firmware](https://github.com/noelanderson/color-controller/actions/workflows/build-firmware.yml/badge.svg)](https://github.com/noelanderson/color-controller/actions/workflows/build-firmware.yml)
+[![Publish firmware reference](https://github.com/noelanderson/color-controller/actions/workflows/publish-doxygen.yml/badge.svg)](https://github.com/noelanderson/color-controller/actions/workflows/publish-doxygen.yml)
+
 Touch Color Controller turns an Elecrow 3.5-inch ESP32-S3 capacitive display
 (DLE06235B) into a wall-panel controller for addressable LED lighting.
 
@@ -68,6 +71,7 @@ boot configuration.
 - Arduino IDE 2.x or Arduino CLI
 - Espressif ESP32 Arduino core 3.3.x
 - Python with `esptool` for the Windows build/upload wrapper
+- Doxygen 1.9 or later (optional, for generating the firmware API reference)
 - Repository libraries:
   - `AddressableLedStrip`
   - `ES8311`
@@ -96,6 +100,28 @@ the display board's existing shared I2C bus.
 
 OPI PSRAM is required for the approximately 307 KB RGB565 framebuffer and the
 vendor display driver's full-frame transfer buffer.
+
+## Generate the firmware reference
+
+Browse the published
+[firmware API reference](https://noelanderson.github.io/color-controller/).
+GitHub Actions regenerates and deploys it after first-party firmware or the
+Doxygen configuration changes on `main`.
+
+The repository-root `Doxyfile` generates an HTML reference for first-party
+firmware under `src/ColorController`. Vendored libraries are intentionally
+outside the input set.
+
+From the repository root, run:
+
+```powershell
+doxygen Doxyfile
+```
+
+Open `build/doxygen/html/index.html` in a browser. Doxygen warnings are written
+to `build/doxygen/warnings.log`. The complete output remains under the ignored
+`build/` directory so it can be reviewed locally without committing generated
+files.
 
 ## Build and upload
 

@@ -15,7 +15,12 @@
  */
 class PresetButtonControl : public ButtonControl, public UiElement {
  public:
-  /** @param index Zero-based ControllerModel preset index represented by this button. */
+  /**
+   * @param canvas Sketch-owned framebuffer used for all drawing.
+   * @param id Stable scene identifier used for targeted redraw and notification.
+   * @param bounds Button hit and drawing rectangle.
+   * @param index Zero-based ControllerModel preset index represented by this button.
+   */
   PresetButtonControl(TFT_eSprite& canvas, UiElementId id, const Ui::Rect& bounds, uint8_t index);
 
   /** Advances hold detection and SAVED-label expiration. */

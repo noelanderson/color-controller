@@ -29,6 +29,7 @@ enum class MicrophoneStatus : uint8_t {
  * and later owns only its ES8311 device handle.
  *
  * @param touchBus Existing initialized I2C master bus shared with touch.
+ * @param messages Fixed-memory mailbox used for cue input and microphone publication.
  * @return true when fixed resources and the service task were created.
  */
 bool start(i2c_master_bus_handle_t touchBus, ControllerMessages& messages);

@@ -95,6 +95,20 @@ bool beginI2s() {
   return true;
 }
 
+/**
+ * Builds the short confirmation sound played for button feedback.
+ *
+ * The configured tone is a 30 ms, 1800 Hz sine wave at a deliberately modest
+ * amplitude. A 5 ms linear fade-in and fade-out removes the sharp discontinuity
+ * that would otherwise sound like a click when I2S starts and stops. Both
+ * stereo slots receive the same sample because the board has one speaker; the
+ * duplicated channels satisfy the ES8311/I2S frame format rather than creating
+ * a stereo effect.
+ *
+ * Single feedback plays this waveform once. Double feedback plays the same
+ * waveform twice with the configured 25 ms silent gap; no second waveform is
+ * stored.
+ */
 void prepareToneBuffer() {
   const uint32_t fadeSamples = Config::kAudioSampleRate * Config::kAudioFadeMs /
                                kMillisecondsPerSecond;
@@ -110,6 +124,8 @@ void prepareToneBuffer() {
     } else if (sampleIndex > kToneFrames - fadeSamples) {
       envelope = static_cast<float>(kToneFrames - sampleIndex) / fadeSamples;
     }
+    // angularStep advances one configured-frequency sine wave through the
+    // 16 kHz sample stream. The envelope changes only loudness, not pitch.
     const int16_t sample =
         static_cast<int16_t>(sinf(angularStep * static_cast<float>(sampleIndex)) *
                              Config::kAudioToneAmplitude * envelope);
