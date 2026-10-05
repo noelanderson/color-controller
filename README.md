@@ -199,7 +199,9 @@ To build a different screen:
    startup.
 7. If the new UI requires additional coroutines, update the fixed task and
    frame-pool budgets in [`AwaitConfig.h`](src/ColorController/AwaitConfig.h).
-   The current application uses five of its six task slots.
+   The current application uses six steady-state slots plus one transient slot
+   for cooperative tone playback. Eight configured slots and 3072 frame-pool
+   bytes leave one slot for startup diagnostics or a bounded extension.
 
 An element may implement:
 
@@ -257,10 +259,11 @@ Run the host-side tests from a Visual Studio Developer PowerShell:
 ```powershell
 New-Item -ItemType Directory -Force build | Out-Null
 cl /std:c++20 /EHsc `
-  /Fo:build\color_math_tests.obj `
-  /Fe:build\color_math_tests.exe `
-  tests\color_math_tests.cpp
-.\build\color_math_tests.exe
+  /Fo:build\ `
+  /Fe:build\controller_tests.exe `
+  tests\controller_tests.cpp `
+  src\ColorController\UiActionProcessor.cpp
+.\build\controller_tests.exe
 ```
 
 The tests cover color conversion, wheel and brightness mapping, preset gestures,

@@ -8,7 +8,20 @@ skinparam linetype ortho
 skinparam packageStyle rectangle
 
 class InteractionController {
-  +poll(now)
+  +poll(now, actions[2]) : uint8_t
+}
+
+class TouchTask <<coroutine>> {
+  +monitorTouchInput()
+}
+
+class UiActionQueue <<SimpleAwait Queue<UiAction, 8>>> {
+  +send(action)
+  +receive() : UiAction
+}
+
+class ApplicationTask <<coroutine>> {
+  +processUiActions()
 }
 
 class ColorControllerSketch <<composition root>> {
@@ -45,6 +58,13 @@ class TouchDispatcher {
 
 class UiActionProcessor {
   +process(action, now)
+}
+
+class ControllerMessages {
+  +requestLighting()
+  +requestUi(refresh)
+  +noteManualColor(color, now)
+  +requestAudio(cue)
 }
 
 class InteractiveControls {
@@ -146,14 +166,19 @@ PresetButtonControl *-- PresetGesture
 InteractionController --> TouchDispatcher : normalized samples
 TouchDispatcher --> InteractiveControls : enumerate controls
 TouchDispatcher --> InteractiveControl : offer down, capture claimant
-InteractionController --> UiActionProcessor : actions and ticks
-UiActionProcessor --> UiRenderer : requests redraws
+InteractionController --> TouchTask : returns actions and ticks
+TouchTask --> UiActionQueue : publishes, suspends on backpressure
+UiActionQueue --> ApplicationTask : ordered actions
+ApplicationTask --> UiActionProcessor : invokes
+UiActionProcessor --> ControllerMessages : publishes side-effect messages
+ControllerMessages --> UiRenderer : UI task consumes dirty mask
 UiRenderer --> UiScene : draws scene or element ID
 ColorControllerSketch --> InteractiveControls : registers input in setup()
 ColorControllerSketch --> UiScene : registers drawing in setup()
 
 note right of InteractionController
   Sole touch-hardware reader.
+  Performs no application side effects.
 end note
 
 note right of TouchDispatcher

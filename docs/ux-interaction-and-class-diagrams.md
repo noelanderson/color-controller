@@ -64,7 +64,10 @@ stateDiagram-v2
 ## Touch target and event routing
 
 Controls own hit testing, value mapping, local gesture state, and drawing.
-`TouchDispatcher` owns pointer capture and `UiActionProcessor` owns application side effects.
+`TouchDispatcher` owns pointer capture. `InteractionController` returns the
+resulting semantic actions to `monitorTouchInput()`, which publishes them to a
+bounded queue. After startup restoration, the application coroutine is the only
+caller that mutates `ControllerModel`.
 
 ```mermaid
 flowchart LR
@@ -79,17 +82,21 @@ flowchart LR
     Claim --> Power["PowerButtonControl<br/>UiAction TogglePower"]
     Claim --> Slider["BrightnessSliderControl<br/>UiAction SetBrightness"]
 
-    Wheel --> Router["UiActionProcessor<br/>application side effects"]
-    Presets --> Router
-    Modes --> Router
-    Power --> Router
-    Slider --> Router
+    Wheel --> Reader
+    Presets --> Reader
+    Modes --> Reader
+    Power --> Reader
+    Slider --> Reader
+    Reader --> Producer["monitorTouchInput coroutine<br/>publishes returned actions"]
+    Producer --> Queue["SimpleAwait Queue&lt;UiAction, 8&gt;<br/>ordered, bounded FIFO"]
 
-    Router --> Model["ControllerModel"]
-    Router --> Lighting["LightingOutput"]
-    Router --> Persistence["ColorPersistenceService"]
-    Router --> Audio["AudioFeedback"]
-    Router --> Renderer["UiRenderer"]
+    Queue --> App["Application coroutine<br/>UiActionProcessor"]
+    App --> Model["ControllerModel<br/>sole steady-state mutation owner"]
+    App --> Messages["ControllerMessages<br/>coalesced fixed-memory mailboxes"]
+    Messages --> Lighting["Lighting coroutine<br/>sole LED writer"]
+    Messages --> Persistence["Persistence coroutine<br/>sole NVS coordinator"]
+    Messages --> Audio["Audio coroutine<br/>sole codec/I2S owner"]
+    Messages --> Renderer["UI coroutine<br/>sole runtime renderer"]
 
     Renderer --> Scene["UiScene<br/>registered drawable elements"]
     Scene --> Controls
@@ -173,11 +180,15 @@ sequenceDiagram
     participant Dispatcher as TouchDispatcher
     participant Controls as InteractiveControls
     participant Wheel as ColorWheelControl
+    participant TouchTask as monitorTouchInput
+    participant Queue as Queue<UiAction, 8>
+    participant App as Application task
     participant Actions as UiActionProcessor
     participant Model as ControllerModel
-    participant Lighting as LightingOutput
-    participant Persistence as ColorPersistenceService
-    participant Renderer as UiRenderer
+    participant Messages as ControllerMessages
+    participant Lighting as Lighting task
+    participant Persistence as Persistence task
+    participant Renderer as UI task
 
     User->>Touch: press or drag on wheel
     Touch->>Interaction: touch sample x, y
@@ -186,11 +197,16 @@ sequenceDiagram
     Dispatcher->>Wheel: tryTouchDown(event)
     Wheel-->>Dispatcher: claimed + SelectColor action
     Dispatcher->>Wheel: touchMove(event) while captured
-    Wheel-->>Actions: SelectColor action
+    Wheel-->>Interaction: SelectColor action
+    Interaction-->>TouchTask: returned action batch
+    TouchTask->>Queue: send action<br/>suspend if queue is full
+    Queue-->>App: receive action
+    App->>Actions: process(action, now)
     Actions->>Model: select(color)<br/>mode = Solid
-    Actions->>Persistence: noteManualColor(color, now)
-    Actions->>Lighting: apply(now)
-    Actions->>Renderer: drawDynamicUi(previewColor)
+    Actions->>Messages: latest color + lighting/UI invalidation
+    Messages-->>Persistence: latest manual color
+    Messages-->>Lighting: apply latest model state
+    Messages-->>Renderer: coalesced dynamic redraw
     Renderer->>Controls: draw preview, marker, presets,<br/>power, and brightness
     Renderer-->>User: flush complete framebuffer
 ```
@@ -204,11 +220,15 @@ sequenceDiagram
     participant Dispatcher as TouchDispatcher
     participant Preset as PresetButtonControl
     participant Gesture as PresetGesture
+    participant TouchTask as monitorTouchInput
+    participant Queue as Queue<UiAction, 8>
+    participant App as Application task
     participant Actions as UiActionProcessor
     participant Model as ControllerModel
-    participant Persistence as ColorPersistenceService
-    participant Renderer as UiRenderer
-    participant Audio as AudioFeedback
+    participant Messages as ControllerMessages
+    participant Persistence as Persistence task
+    participant Renderer as UI task
+    participant Audio as Audio task
 
     User->>Interaction: press P1-P4
     Interaction->>Dispatcher: update(touching, point, now)
@@ -220,18 +240,25 @@ sequenceDiagram
         Preset->>Gesture: update(now, inside, 700 ms)
     end
 
-    Gesture-->>Actions: StorePreset(index), once
+    Gesture-->>Interaction: StorePreset(index), once
+    Interaction-->>TouchTask: returned action batch
+    TouchTask->>Queue: send action
+    Queue-->>App: receive action
+    App->>Actions: process(action, now)
     Actions->>Model: storePreset(index)<br/>mode = Solid
-    Actions->>Persistence: queuePresetSave(index, color)
-    Actions->>Renderer: notify preset ID (PresetSaved, expiry)
+    Actions->>Messages: preset persistence request + double cue
+    Messages-->>Persistence: latest value for preset slot
+    Persistence->>Persistence: savePreset(index, color)
+    Persistence-->>Messages: PresetSaved only after NVS success
+    Messages-->>Renderer: confirmed preset saved notification
     Renderer->>Preset: notify(notification)
-    Actions->>Renderer: drawDynamicUi(...)
-    Actions->>Audio: beepLong()
+    Renderer->>Renderer: drawDynamicUi(...)
+    Messages-->>Audio: double cue
 
     User->>Interaction: release
     Interaction->>Dispatcher: consecutive missing samples
     Dispatcher->>Preset: touchUp(lastPoint, now)
-    Preset-->>Actions: None<br/>store suppresses recall
+    Preset-->>Interaction: None<br/>store suppresses recall
 ```
 
 ### Microphone status and Music
@@ -241,6 +268,7 @@ sequenceDiagram
     participant Setup
     participant Audio as AudioFeedback task
     participant UI as Effect UI task
+    participant Lighting as Lighting task
     participant Renderer as UiRenderer
     participant Music as ModeButtonControl
 
@@ -250,6 +278,7 @@ sequenceDiagram
 
     alt initialization succeeds
         Audio-->>UI: status = Ready
+        Audio-->>Lighting: latest microphone amplitude mailbox
         UI->>Renderer: redraw Music
         Renderer->>Music: draw context without fault dot
     else initialization fails
@@ -261,31 +290,41 @@ sequenceDiagram
 
 ## Runtime task interaction
 
-Arduino `loop()` only polls SimpleAwait. Each steady-state task suspends for a
-positive duration so the scheduler can idle and ESP-IDF work remains responsive.
+Arduino `loop()` only calls `poll_and_wait()`. Six steady-state tasks plus the
+transient audio tone child use at most seven of eight configured task slots,
+leaving one genuine diagnostic/startup headroom slot. Every task suspends for a
+positive duration or on the bounded action queue.
 
 ```mermaid
 flowchart TB
-    Loop["Arduino loop()<br/>simpleawait::poll()"] --> Scheduler["SimpleAwait scheduler"]
+    Loop["Arduino loop()<br/>simpleawait::poll_and_wait()"] --> Scheduler["SimpleAwait scheduler"]
 
     Scheduler --> TouchTask["Touch task<br/>5 ms"]
-    Scheduler --> EffectTask["LED effect task<br/>25 ms"]
-    Scheduler --> UiTask["Effect UI task<br/>200 ms"]
+    Scheduler --> AppTask["Application task<br/>waits on UiAction queue"]
+    Scheduler --> EffectTask["Lighting task<br/>25 ms"]
+    Scheduler --> UiTask["UI task<br/>25 ms mailbox / 200 ms effect"]
     Scheduler --> PersistenceTask["Persistence task<br/>250 ms"]
     Scheduler --> AudioTask["Audio task<br/>5 ms when idle"]
 
     TouchTask --> Interaction["InteractionController"]
     Interaction --> Dispatcher["TouchDispatcher"]
     Dispatcher --> Controls["InteractiveControls"]
-    Controls --> Actions["UiActionProcessor"]
+    Controls --> Queue["Queue&lt;UiAction, 8&gt;"]
+    Queue --> AppTask
+    AppTask --> Actions["UiActionProcessor"]
     Actions --> Model["ControllerModel"]
-    Actions --> Lighting["LightingOutput"]
-    Actions --> Renderer["UiRenderer"]
+    Actions --> Messages["ControllerMessages"]
 
-    EffectTask --> Lighting
-    UiTask --> Renderer
+    Messages --> EffectTask
+    Messages --> UiTask
+    Messages --> PersistenceTask
+    Messages --> AudioTask
+    EffectTask --> Lighting["LightingOutput"]
+    UiTask --> Renderer["UiRenderer"]
     PersistenceTask --> Persistence["ColorPersistenceService"]
     AudioTask --> Audio["ES8311 + I2S"]
+    AudioTask --> Levels["Latest microphone level"]
+    Levels --> Lighting
     Lighting --> LEDs["AddressableLedStrip"]
 ```
 
@@ -306,19 +345,51 @@ Source: [`ui-control-classes.puml`](diagrams/ui-control-classes.puml)
 
 Source: [`runtime-classes.puml`](diagrams/runtime-classes.puml)
 
+## UML communication diagrams
+
+These diagrams number the messages exchanged between runtime objects. They
+complement the sequence diagrams by emphasizing object links, coroutine
+ownership, backpressure, and mailbox semantics.
+
+### Touch action to output
+
+[![Touch action communication](diagrams/touch-action-communication.svg)](diagrams/touch-action-communication.svg)
+
+Source: [`touch-action-communication.puml`](diagrams/touch-action-communication.puml)
+
+### Confirmed preset persistence
+
+[![Confirmed preset-save communication](diagrams/preset-save-communication.svg)](diagrams/preset-save-communication.svg)
+
+Source: [`preset-save-communication.puml`](diagrams/preset-save-communication.puml)
+
+### Audio feedback and microphone sampling
+
+[![Audio communication](diagrams/audio-communication.svg)](diagrams/audio-communication.svg)
+
+Source: [`audio-communication.puml`](diagrams/audio-communication.puml)
+
 ## Ownership rules
 
 1. Controls own geometry, hit testing, mapping, drawing, and local interaction state.
 2. Controls emit values or semantic events; they do not write NVS or operate LEDs/audio.
 3. Every interactive control receives touch-down data and decides whether to claim it.
 4. `TouchDispatcher` preserves the sole claimant through release debounce; layout rules prohibit overlapping controls.
-5. `UiActionProcessor` converts control actions into application side effects.
-6. `ControllerModel` is the source of truth for selected color, brightness, power, mode, and presets.
-7. `UiRenderer` supplies a consistent render context and coordinates complete framebuffer transfers;
+5. `InteractionController` returns actions without mutating application state;
+   `monitorTouchInput()` publishes them to the bounded FIFO and owns backpressure.
+6. The application coroutine is the sole caller of `UiActionProcessor` and the sole steady-state
+   writer of `ControllerModel`; startup restoration writes the model before runtime tasks spawn.
+7. `UiActionProcessor` publishes fixed-memory messages instead of performing device I/O.
+8. `ControllerMessages` coalesces continuous state, preserves one persistence request per preset,
+   and retains the strongest pending audio cue.
+9. The lighting, UI, persistence, and audio coroutines exclusively own their runtime hardware or
+   service adapters.
+10. `ControllerModel` is the source of truth for selected color, brightness, power, mode, and presets.
+11. `UiRenderer` supplies a consistent render context and coordinates complete framebuffer transfers;
    `UiScene` owns ordered element drawing.
-8. The sketch owns and visibly composes individual controls, registering interactive elements with
+12. The sketch owns and visibly composes individual controls, registering interactive elements with
    `InteractiveControls` and drawable elements with `UiScene`.
-9. Both collections store interface pointers only and have no knowledge of concrete control types.
-10. The sketch passes geometry into each element, which uses the same bounds for drawing and hit testing.
-11. Drawable-only elements such as the preview participate in scene order without appearing in the
+13. Both collections store interface pointers only and have no knowledge of concrete control types.
+14. The sketch passes geometry into each element, which uses the same bounds for drawing and hit testing.
+15. Drawable-only elements such as the preview participate in scene order without appearing in the
     touch collection.

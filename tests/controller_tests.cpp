@@ -8,12 +8,14 @@
 
 #include "../src/ColorController/ButtonControl.h"
 #include "../src/ColorController/ColorMath.h"
+#include "../src/ColorController/ControllerMessages.h"
 #include "../src/ColorController/ControllerModel.h"
 #include "../src/ColorController/InteractiveControls.h"
 #include "../src/ColorController/PersistencePolicy.h"
 #include "../src/ColorController/PresetGesture.h"
 #include "../src/ColorController/ReactiveLighting.h"
 #include "../src/ColorController/TouchDispatcher.h"
+#include "../src/ColorController/UiActionProcessor.h"
 #include "../src/ColorController/UiGeometry.h"
 
 namespace {
@@ -76,6 +78,97 @@ void testBrightnessMapping() {
   assert(brightnessFromX(150, 100, 200) == 127);
   assert(brightnessFromX(200, 100, 200) == 255);
   assert(brightnessFromX(250, 100, 200) == 255);
+}
+
+void testControllerMessages() {
+  ControllerMessages messages;
+
+  messages.requestLighting(false, kUiRefreshPower);
+  messages.requestLighting(true, kUiRefreshBrightness);
+  const LightingMessage lighting = messages.takeLighting();
+  assert(lighting.apply);
+  assert(lighting.resetMusicEnvelope);
+  assert((lighting.uiAfterApply & kUiRefreshPower) != 0);
+  assert((lighting.uiAfterApply & kUiRefreshBrightness) != 0);
+  assert(!messages.takeLighting().apply);
+
+  messages.requestUi(kUiRefreshPower);
+  messages.requestUi(kUiRefreshBrightness);
+  messages.notifyPresetSaved(2);
+  messages.requestPresetRedraw(1);
+  const UiMessage ui = messages.takeUi();
+  assert((ui.refresh & kUiRefreshPower) != 0);
+  assert((ui.refresh & kUiRefreshBrightness) != 0);
+  assert(ui.savedPresetMask == (1U << 2));
+  assert(ui.redrawPresetMask == (1U << 1));
+  assert(messages.takeUi().refresh == kUiRefreshNone);
+
+  messages.noteManualColor({1, 2, 3}, 10);
+  messages.noteManualColor({4, 5, 6}, 20);
+  messages.queuePresetSave(0, {7, 8, 9}, 30);
+  messages.queuePresetSave(3, {10, 11, 12}, 40);
+  const PersistenceMessage persistence = messages.takePersistence();
+  assert(persistence.manualColor == ManualColorMessage::kChanged);
+  assert((persistence.color == RgbColor{4, 5, 6}));
+  assert(persistence.now == 20);
+  assert(persistence.presetMask == ((1U << 0) | (1U << 3)));
+  assert((persistence.presetColors[0] == RgbColor{7, 8, 9}));
+  assert((persistence.presetColors[3] == RgbColor{10, 11, 12}));
+
+  messages.noteManualColor({1, 1, 1}, 50);
+  messages.cancelManualColor();
+  assert(messages.takePersistence().manualColor == ManualColorMessage::kCancelled);
+
+  messages.requestAudio(AudioCue::kSingle);
+  messages.requestAudio(AudioCue::kDouble);
+  messages.requestAudio(AudioCue::kSingle);
+  assert(messages.takeAudio() == AudioCue::kDouble);
+  assert(messages.takeAudio() == AudioCue::kNone);
+}
+
+void testUiActionMessages() {
+  ControllerModel model;
+  ControllerMessages messages;
+  UiActionProcessor processor(model, messages);
+
+  processor.process(UiAction::selectColor({10, 20, 30}), 100);
+  assert((model.selected() == RgbColor{10, 20, 30}));
+  LightingMessage lighting = messages.takeLighting();
+  assert(lighting.apply);
+  assert((lighting.uiAfterApply & kUiRefreshDynamic) != 0);
+  PersistenceMessage persistence = messages.takePersistence();
+  assert(persistence.manualColor == ManualColorMessage::kChanged);
+  assert((persistence.color == RgbColor{10, 20, 30}));
+  assert(persistence.now == 100);
+
+  processor.process(UiAction::setBrightness(42), 110);
+  assert(model.brightness() == 42);
+  lighting = messages.takeLighting();
+  assert(lighting.apply);
+  assert((lighting.uiAfterApply & kUiRefreshBrightness) != 0);
+
+  processor.process(UiAction::preset(UiActionType::kStorePreset, 1), 120);
+  assert((model.preset(1) == RgbColor{10, 20, 30}));
+  persistence = messages.takePersistence();
+  assert(persistence.manualColor == ManualColorMessage::kChanged);
+  assert((persistence.presetMask & (1U << 1)) != 0);
+  assert((persistence.presetColors[1] == RgbColor{10, 20, 30}));
+  assert(messages.takeUi().savedPresetMask == 0);
+  assert(messages.takeAudio() == AudioCue::kDouble);
+
+  processor.process(UiAction::activateMode(OutputMode::kMusic), 130);
+  assert(model.mode() == OutputMode::kMusic);
+  lighting = messages.takeLighting();
+  assert(lighting.apply);
+  assert(lighting.resetMusicEnvelope);
+  assert(messages.takePersistence().manualColor == ManualColorMessage::kCancelled);
+  assert(messages.takeAudio() == AudioCue::kSingle);
+
+  processor.process(UiAction::togglePower(), 140);
+  assert(!model.powerOn());
+  lighting = messages.takeLighting();
+  assert(lighting.apply);
+  assert((lighting.uiAfterApply & kUiRefreshPower) != 0);
 }
 
 void testPresetGesture() {
@@ -256,12 +349,14 @@ int main() {
   testWheelGeometry();
   testWheelMarkerRepairBounds();
   testBrightnessMapping();
+  testControllerMessages();
+  testUiActionMessages();
   testPresetGesture();
   testButtonAndTouchDispatch();
   testControllerModes();
   testReactiveLightingMath();
   testMusicEnvelope();
   testPersistencePolicy();
-  std::cout << "Color math tests passed\n";
+  std::cout << "Controller tests passed\n";
   return 0;
 }

@@ -2,8 +2,8 @@
 
 #include <stdint.h>
 
-#define SIMPLEAWAIT_MAX_TASKS 6
-#define SIMPLEAWAIT_FRAME_POOL_BYTES 2048
+#define SIMPLEAWAIT_MAX_TASKS 8
+#define SIMPLEAWAIT_FRAME_POOL_BYTES 3072
 #define SIMPLEAWAIT_ON_ERROR(error) (::AwaitStatus::record(error))
 
 /**

@@ -87,7 +87,8 @@ main sketch renders the two dedicated mode controls and updates active effects
 at a bounded frame rate.
 
 `AudioFeedback` becomes a small duplex audio service: TX continues to provide
-button beeps, while RX samples the ES8311 microphone without blocking. The
+button beeps, while its coroutine exclusively samples the ES8311 microphone and
+publishes the latest amplitude without blocking the lighting task. The
 minimal ES8311 driver gains the two vendor-proven analog microphone register
 writes. Existing touch and display drivers remain unchanged.
 
@@ -117,9 +118,10 @@ writes. Existing touch and display drivers remain unchanged.
 ### Implementation Considerations
 
 - **Approach:** Use fixed-memory SimpleAwait tasks as the cooperative scheduler.
-  A 25 ms task updates LEDs, while separate tasks handle touch, effect UI, audio,
-  and persistence. Rainbow hue and breathing are derived from absolute time, so
-  missed frames do not accumulate drift.
+  A 25 ms task exclusively updates LEDs, while separate tasks handle touch,
+  application actions, UI, audio, and persistence. Coalesced mailboxes prevent
+  stale frame/audio backlogs. Rainbow hue and breathing are derived from
+  absolute time, so missed frames do not accumulate drift.
 - **Music response:** Convert short microphone blocks to mean absolute sample
   amplitude, remove an adaptive noise floor, normalize against a tracked peak,
   and apply attack/release smoothing. Use the result to scale the user's

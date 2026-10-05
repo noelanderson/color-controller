@@ -1,0 +1,45 @@
+@startuml
+title Audio feedback and microphone communication
+
+skinparam backgroundColor transparent
+skinparam shadowing false
+skinparam linetype ortho
+
+object "processUiActions\n(application coroutine)" as Application
+object "UiActionProcessor" as Processor
+object "ControllerMessages" as Messages
+object "AudioFeedback::service\n(audio coroutine)" as AudioTask
+object ES8311
+object "ESP-IDF I2S RX/TX" as I2s
+object "playTone\n(child coroutine)" as Tone
+object "updateLighting\n(lighting coroutine)" as LightingTask
+object "LightingOutput" as Lighting
+object MusicEnvelope
+
+Application --> Processor : 1: process semantic action
+Processor --> Messages : 1.1: request strongest pending AudioCue
+Messages --> AudioTask : 2: takeAudio()
+AudioTask --> Tone : 2.1: co_await playTone()
+Tone --> I2s : 2.2: preload complete fixed tone
+Tone --> I2s : 2.3: enable hardware-clocked playback
+Tone --> Tone : 2.4: delay for exact tone duration
+Tone --> I2s : 2.5: disable channel
+Tone --> AudioTask : 2.6: completion
+
+AudioTask --> ES8311 : 3: configure codec once
+AudioTask --> I2s : 4: zero-timeout microphone read
+AudioTask --> AudioTask : 4.1: publish latest amplitude mailbox
+LightingTask --> Lighting : 5: apply music frame
+Lighting --> AudioTask : 5.1: take latest amplitude
+Lighting --> MusicEnvelope : 5.2: attack/release update
+
+note bottom of Messages
+  Feedback cues intentionally coalesce:
+  Double outranks Single while one cue is pending.
+end note
+
+note bottom of AudioTask
+  The audio coroutine exclusively owns ES8311
+  and I2S. Old microphone samples are discarded.
+end note
+@enduml

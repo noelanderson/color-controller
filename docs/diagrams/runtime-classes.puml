@@ -21,7 +21,20 @@ class ControllerModel {
 }
 
 class InteractionController {
-  +poll(now)
+  +poll(now, actions[2]) : uint8_t
+}
+
+class TouchTask <<coroutine>> {
+  +monitorTouchInput()
+}
+
+class UiActionQueue <<SimpleAwait Queue<UiAction, 8>>> {
+  +send(action)
+  +receive() : UiAction
+}
+
+class ApplicationTask <<coroutine>> {
+  +processUiActions()
 }
 
 class TouchDispatcher {
@@ -30,6 +43,34 @@ class TouchDispatcher {
 
 class UiActionProcessor {
   +process(action, now)
+}
+
+class ControllerMessages <<coalesced mailboxes>> {
+  +requestLighting(resetEnvelope)
+  +takeLighting() : LightingMessage
+  +requestUi(refresh)
+  +takeUi() : UiMessage
+  +noteManualColor(color, now)
+  +queuePresetSave(index, color, now)
+  +takePersistence() : PersistenceMessage
+  +requestAudio(cue)
+  +takeAudio() : AudioCue
+}
+
+class LightingTask <<coroutine>> {
+  +updateLighting()
+}
+
+class UiTask <<coroutine>> {
+  +updateEffectUi()
+}
+
+class PersistenceTask <<coroutine>> {
+  +persistStableManualColor()
+}
+
+class AudioTask <<coroutine>> {
+  +service(touchBus, messages)
 }
 
 class LightingOutput {
@@ -55,11 +96,9 @@ class ColorPersistenceService {
 }
 
 class AudioFeedback <<namespace>> {
-  +start(touchBus) : bool
+  +start(touchBus, messages) : bool
   +microphoneStatus() : MicrophoneStatus
   +readMicrophoneLevel(magnitude) : bool
-  +beep()
-  +beepLong()
 }
 
 class ES8311 <<library>> {
@@ -92,16 +131,27 @@ class TFT_eSprite <<framebuffer>>
 
 InteractionController --> ST77922_TOUCH : reads samples
 InteractionController --> TouchDispatcher : forwards samples
-InteractionController --> UiActionProcessor : forwards actions
+InteractionController --> TouchTask : returns actions
+TouchTask --> UiActionQueue : publishes, suspends on backpressure
+UiActionQueue --> ApplicationTask : ordered actions
+ApplicationTask --> UiActionProcessor : invokes
 UiActionProcessor --> ControllerModel : updates state
-UiActionProcessor --> LightingOutput : applies output
-UiActionProcessor --> ColorPersistenceService : schedules saves
-UiActionProcessor --> AudioFeedback : requests feedback
-UiActionProcessor --> UiRenderer : requests redraws
+UiActionProcessor --> ControllerMessages : publishes effects
+
+ControllerMessages --> LightingTask : latest lighting request
+LightingTask --> ControllerMessages : UI invalidation after apply
+ControllerMessages --> UiTask : coalesced dirty mask
+ControllerMessages --> PersistenceTask : latest/per-preset requests
+ControllerMessages --> AudioTask : strongest pending cue
+
+LightingTask --> LightingOutput : sole runtime writer
+UiTask --> UiRenderer : sole runtime renderer
+PersistenceTask --> ColorPersistenceService : sole runtime owner
+AudioTask --> AudioFeedback : codec and I2S owner
 
 LightingOutput --> ControllerModel : reads output state
 LightingOutput *-- AddressableLedStrip
-LightingOutput --> AudioFeedback : reads microphone level
+LightingOutput --> AudioFeedback : takes latest level
 AudioFeedback --> ES8311 : configures shared-bus codec
 
 ColorPersistenceService --> ControllerModel : restores and persists
@@ -111,12 +161,18 @@ UiRenderer --> TFT_eSprite : draws complete frame
 UiRenderer --> ST77922 : transfers frame
 
 note bottom of UiActionProcessor
-  Application side effects remain outside
-  focused UI controls.
+  Called only by the application task.
+  Mutates the model and publishes messages;
+  performs no device I/O.
+end note
+
+note bottom of ControllerMessages
+  Continuous state coalesces to the latest value.
+  Preset persistence retains one value per slot.
 end note
 
 note bottom of AudioFeedback
-  Owns its SimpleAwait service task,
-  codec, microphone, and beep sequencing.
+  Audio task exclusively owns codec and I2S.
+  Lighting consumes published amplitude samples.
 end note
 @enduml

@@ -1,0 +1,52 @@
+@startuml
+title Confirmed preset-save communication
+
+skinparam backgroundColor transparent
+skinparam shadowing false
+skinparam linetype ortho
+
+object User
+object "monitorTouchInput\n(touch coroutine)" as TouchTask
+object "Queue<UiAction, 8>" as Queue
+object "processUiActions\n(application coroutine)" as Application
+object "UiActionProcessor" as Processor
+object "ControllerModel" as Model
+object "ControllerMessages" as Messages
+object "persistStableManualColor\n(persistence coroutine)" as PersistenceTask
+object "ColorPersistenceService" as Persistence
+object "ESP32 Preferences / NVS" as Nvs
+object "updateEffectUi\n(UI coroutine)" as UiTask
+object "UiRenderer" as Renderer
+object "PresetButtonControl" as Preset
+
+User --> TouchTask : 1: hold preset for 700 ms
+TouchTask --> Queue : 2: send(StorePreset)
+Queue --> Application : 3: receive()
+Application --> Processor : 4: process(StorePreset, now)
+Processor --> Model : 4.1: copy selected color to preset
+Processor --> Messages : 4.2: publish latest preset-save request
+Messages --> PersistenceTask : 5: takePersistence()
+PersistenceTask --> Persistence : 5.1: queuePresetSave(...)
+PersistenceTask --> Persistence : 6: process(now, model)
+Persistence --> Nvs : 6.1: putUInt(preset key)
+
+Nvs --> Persistence : 7a: success
+Persistence --> PersistenceTask : 7a.1: return saved preset bit
+PersistenceTask --> Messages : 7a.2: notifyPresetSaved(index)
+Messages --> UiTask : 7a.3: confirmed SAVED notification
+UiTask --> Renderer : 7a.4: notify + redraw preset
+Renderer --> Preset : 7a.5: show SAVED for bounded duration
+
+Nvs --> Persistence : 7b: failure
+Persistence --> PersistenceTask : 7b.1: retain pending value\nand schedule retry
+
+note bottom of Persistence
+  Failure logs a warning and never emits
+  the success-shaped SAVED notification.
+end note
+
+note bottom of Messages
+  Each preset slot retains its latest desired
+  value until the persistence owner consumes it.
+end note
+@enduml

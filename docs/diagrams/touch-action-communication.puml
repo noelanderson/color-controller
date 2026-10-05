@@ -1,0 +1,51 @@
+@startuml
+title Touch action communication
+
+skinparam backgroundColor transparent
+skinparam shadowing false
+skinparam linetype ortho
+
+object User
+object "ST77922_TOUCH" as Touch
+object "monitorTouchInput\n(touch coroutine)" as TouchTask
+object "InteractionController" as Interaction
+object "TouchDispatcher" as Dispatcher
+object "Queue<UiAction, 8>" as Queue
+object "processUiActions\n(application coroutine)" as Application
+object "UiActionProcessor" as Processor
+object "ControllerModel" as Model
+object "ControllerMessages" as Messages
+object "updateLighting\n(lighting coroutine)" as LightingTask
+object "LightingOutput" as Lighting
+object "updateEffectUi\n(UI coroutine)" as UiTask
+object "UiRenderer" as Renderer
+
+User --> Touch : 1: press / move / release
+TouchTask --> Touch : 2: sample contact
+TouchTask --> Interaction : 3: poll(now, actions)
+Interaction --> Dispatcher : 3.1: update contact + tick
+Dispatcher --> Interaction : 3.2: return up to two UiAction values
+Interaction --> TouchTask : 3.3: return ordered action batch
+TouchTask --> Queue : 4: send(action)\n(suspends on backpressure)
+Queue --> Application : 5: receive()
+Application --> Processor : 6: process(action, now)
+Processor --> Model : 6.1: mutate steady-state model
+Processor --> Messages : 6.2: publish coalesced effects
+Messages --> LightingTask : 7: takeLighting()
+LightingTask --> Lighting : 7.1: apply latest model state
+LightingTask --> Messages : 7.2: publish UI invalidation\nafter output is current
+Messages --> UiTask : 8: takeUi()
+UiTask --> Renderer : 8.1: redraw dirty elements once
+Renderer --> User : 8.2: flush framebuffer
+
+note bottom of Queue
+  Semantic actions are lossless and FIFO.
+  Continuous rendering state coalesces only
+  after the application task processes them.
+end note
+
+note bottom of Model
+  PersistentState restores startup values
+  before these runtime tasks are spawned.
+end note
+@enduml

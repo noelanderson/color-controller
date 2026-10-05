@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "ControllerMessages.h"
 #include "driver/i2c_master.h"
 
 /**
@@ -28,23 +29,18 @@ enum class MicrophoneStatus : uint8_t {
  * @param touchBus Existing initialized I2C master bus shared with touch.
  * @return true when fixed resources and the service task were created.
  */
-bool start(i2c_master_bus_handle_t touchBus);
+bool start(i2c_master_bus_handle_t touchBus, ControllerMessages& messages);
 
 /** Distinguishes startup from a confirmed microphone failure for the UI. */
 MicrophoneStatus microphoneStatus();
 
 /**
- * Reads one non-blocking block-amplitude sample when microphone data is ready.
+ * Takes the latest amplitude sample published by the audio coroutine.
  *
  * @param magnitude Receives the mean absolute sample magnitude on success.
  * @return true when a complete input block was available; false leaves
  *         magnitude unchanged.
  */
 bool readMicrophoneLevel(uint16_t& magnitude);
-
-/** Queues the normal button tone without blocking; duplicate pending requests coalesce. */
-void beep();
-/** Queues the longer preset-saved tone without blocking; duplicate pending requests coalesce. */
-void beepLong();
 
 }  // namespace AudioFeedback

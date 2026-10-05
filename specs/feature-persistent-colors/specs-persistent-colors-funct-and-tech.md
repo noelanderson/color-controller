@@ -22,9 +22,9 @@ remained unchanged for at least two minutes. Restore all valid saved values at
 startup in solid mode. Entering rainbow or music cancels a pending active-color
 save, so generated colors never become startup state.
 
-Fixed-memory SimpleAwait C++20 tasks own touch, display refresh, audio
-sequencing, effect frames, and the low-frequency persistence stability check.
-Arduino `loop()` only polls the scheduler.
+Fixed-memory SimpleAwait C++20 tasks own touch, ordered action processing,
+display refresh, audio sequencing/sampling, effect frames, and the low-frequency
+persistence stability check. Arduino `loop()` only calls `poll_and_wait()`.
 
 ### Functional Requirements
 
@@ -65,9 +65,10 @@ Arduino `loop()` only polls the scheduler.
 
 `PersistentState` owns the Preferences namespace and deduplicates writes.
 `ManualColorSaveTracker` is a hardware-independent rollover-safe policy object.
-Five SimpleAwait tasks own touch handling, LED effects, effect UI refresh,
-audio initialization/feedback, and persistence. The persistence task polls its
-policy every 250 ms and performs the NVS write after 120 seconds.
+Six SimpleAwait tasks own touch input, application actions, LED effects, UI
+refresh, audio, and persistence. `ControllerMessages` coalesces manual-color
+changes and retains one pending value per preset before the persistence task
+polls its policy every 250 ms and performs the NVS write after 120 seconds.
 `ControllerModel` exposes bounded preset restoration.
 
 ### Dependencies
@@ -82,7 +83,7 @@ policy every 250 ms and performs the NVS write after 120 seconds.
 - [x] Use a namespace and keys within ESP32 Preferences limits.
 - [x] Deduplicate identical values to limit flash wear.
 - [x] Use unsigned elapsed-time arithmetic across `millis()` rollover.
-- [x] Configure SimpleAwait for six task slots and a 2048-byte fixed frame pool.
+- [x] Configure SimpleAwait for eight task slots and a 3072-byte fixed frame pool.
 - [x] Surface Preferences initialization and write failures over Serial.
 - [x] Preserve NVS during normal policy-safe uploads by flashing discrete images.
 

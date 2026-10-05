@@ -4,7 +4,7 @@
 
 #include "InteractiveControls.h"
 #include "TouchDispatcher.h"
-#include "UiActionProcessor.h"
+#include "UiAction.h"
 
 /**
  * Reads the touch hardware and feeds normalized samples into the dispatcher.
@@ -16,14 +16,12 @@
 class InteractionController {
  public:
   /** Binds non-owning references; all collaborators must outlive the controller. */
-  InteractionController(ST77922_TOUCH& touch, InteractiveControls& controls,
-                        UiActionProcessor& actionProcessor);
+  InteractionController(ST77922_TOUCH& touch, InteractiveControls& controls);
 
-  /** Reads one hardware sample, dispatches it, and advances timed controls. */
-  void poll(uint32_t now);
+  /** Reads one hardware sample and returns up to two ordered semantic actions. */
+  uint8_t poll(uint32_t now, UiAction (&actions)[2]);
 
  private:
   ST77922_TOUCH& touch_;
-  UiActionProcessor& actionProcessor_;
   TouchDispatcher dispatcher_;
 };

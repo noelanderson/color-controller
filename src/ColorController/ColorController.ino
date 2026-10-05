@@ -7,6 +7,7 @@
 #include "AwaitConfig.h"
 #include "ColorPersistenceService.h"
 #include "Config.h"
+#include "ControllerMessages.h"
 #include "ControllerModel.h"
 #include "BrightnessSliderControl.h"
 #include "ColorPreviewControl.h"
@@ -30,6 +31,8 @@ ST77922 display;
 ST77922_TOUCH touch;
 ControllerModel model;
 LightingOutput lightingOutput(model);
+ControllerMessages controllerMessages;
+simpleawait::Queue<UiAction, Config::kUiActionQueueCapacity> uiActionQueue;
 
 // UI composition. Geometry lives in UiLayout.h; this block makes the visible
 // controls, their types, and their screen arrangement easy to discover.
@@ -72,8 +75,8 @@ InteractiveControls interactiveControls;
 UiScene uiScene;
 UiRenderer uiRenderer(canvas, display, model, uiScene);
 ColorPersistenceService persistenceService;
-UiActionProcessor uiActionProcessor(model, lightingOutput, uiRenderer, persistenceService);
-InteractionController interactionController(touch, interactiveControls, uiActionProcessor);
+UiActionProcessor uiActionProcessor(model, controllerMessages);
+InteractionController interactionController(touch, interactiveControls);
 
 bool configureUserInterface() {
   interactiveControls.clear();
@@ -110,7 +113,11 @@ bool configureUserInterface() {
 simpleawait::Task<void> monitorTouchInput() {
   while (true) {
     const uint32_t now = millis();
-    interactionController.poll(now);
+    UiAction actions[2];
+    const uint8_t actionCount = interactionController.poll(now, actions);
+    for (uint8_t index = 0; index < actionCount; ++index) {
+      co_await uiActionQueue.send(actions[index]);
+    }
 
     uint8_t error = 0;
     if (AwaitStatus::take(error)) {
@@ -120,11 +127,25 @@ simpleawait::Task<void> monitorTouchInput() {
   }
 }
 
-simpleawait::Task<void> updateEffects() {
+simpleawait::Task<void> processUiActions() {
+  while (true) {
+    const UiAction action = co_await uiActionQueue.receive();
+    uiActionProcessor.process(action, millis());
+  }
+}
+
+simpleawait::Task<void> updateLighting() {
   while (true) {
     co_await simpleawait::delay_ms(Config::kEffectFrameMs);
-    if (model.powerOn() && model.mode() != OutputMode::kSolid) {
+    const LightingMessage message = controllerMessages.takeLighting();
+    if (message.resetMusicEnvelope) {
+      lightingOutput.resetMusicEnvelope();
+    }
+    if (message.apply || (model.powerOn() && model.mode() != OutputMode::kSolid)) {
       lightingOutput.apply();
+    }
+    if (message.uiAfterApply != kUiRefreshNone) {
+      controllerMessages.requestUi(message.uiAfterApply);
     }
   }
 }
@@ -132,21 +153,60 @@ simpleawait::Task<void> updateEffects() {
 simpleawait::Task<void> updateEffectUi() {
   AudioFeedback::MicrophoneStatus displayedMicrophoneStatus =
       AudioFeedback::MicrophoneStatus::kInitializing;
+  uint32_t lastEffectRefreshAt = millis();
   while (true) {
-    co_await simpleawait::delay_ms(Config::kEffectUiFrameMs);
+    co_await simpleawait::delay_ms(Config::kUiServicePollMs);
+    const uint32_t now = millis();
+    UiMessage message = controllerMessages.takeUi();
     bool displayChanged = false;
 
     const AudioFeedback::MicrophoneStatus microphoneStatus = AudioFeedback::microphoneStatus();
     if (microphoneStatus != displayedMicrophoneStatus) {
       displayedMicrophoneStatus = microphoneStatus;
+      message.refresh |= kUiRefreshMusic;
+    }
+
+    if (model.mode() != OutputMode::kSolid &&
+        static_cast<uint32_t>(now - lastEffectRefreshAt) >= Config::kEffectUiFrameMs) {
+      lastEffectRefreshAt = now;
+      message.refresh |= kUiRefreshPreview | kUiRefreshBrightness;
+    }
+
+    for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
+      const uint8_t bit = static_cast<uint8_t>(1U << index);
+      if ((message.savedPresetMask & bit) != 0) {
+        uiRenderer.notifyElement(
+            UiElementIds::preset(index),
+            {UiNotificationType::kPresetSaved, now + Config::kSavedFeedbackMs});
+        message.redrawPresetMask |= bit;
+      }
+    }
+
+    if ((message.refresh & kUiRefreshDynamic) != 0) {
+      uiRenderer.drawDynamicUi(lightingOutput.previewColor());
+      continue;
+    }
+    if ((message.refresh & kUiRefreshPreview) != 0) {
+      uiRenderer.drawElement(UiElementIds::kPreview, lightingOutput.previewColor());
+      displayChanged = true;
+    }
+    if ((message.refresh & kUiRefreshBrightness) != 0) {
+      uiRenderer.drawElement(UiElementIds::kBrightness, lightingOutput.previewColor());
+      displayChanged = true;
+    }
+    if ((message.refresh & kUiRefreshPower) != 0) {
+      uiRenderer.drawElement(UiElementIds::kPower, lightingOutput.previewColor());
+      displayChanged = true;
+    }
+    if ((message.refresh & kUiRefreshMusic) != 0) {
       uiRenderer.drawElement(UiElementIds::kMusic, lightingOutput.previewColor());
       displayChanged = true;
     }
-
-    if (model.mode() != OutputMode::kSolid) {
-      uiRenderer.drawElement(UiElementIds::kPreview, lightingOutput.previewColor());
-      uiRenderer.drawElement(UiElementIds::kBrightness, lightingOutput.previewColor());
-      displayChanged = true;
+    for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
+      if ((message.redrawPresetMask & static_cast<uint8_t>(1U << index)) != 0) {
+        uiRenderer.drawElement(UiElementIds::preset(index), lightingOutput.previewColor());
+        displayChanged = true;
+      }
     }
     if (displayChanged) {
       uiRenderer.flushDisplay();
@@ -157,7 +217,24 @@ simpleawait::Task<void> updateEffectUi() {
 simpleawait::Task<void> persistStableManualColor() {
   while (true) {
     co_await simpleawait::delay_ms(Config::kPersistencePollMs);
-    persistenceService.process(millis(), model);
+    const PersistenceMessage message = controllerMessages.takePersistence();
+    if (message.manualColor == ManualColorMessage::kChanged) {
+      persistenceService.noteManualColor(message.color, message.now);
+    } else if (message.manualColor == ManualColorMessage::kCancelled) {
+      persistenceService.cancelManualColor();
+    }
+    for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
+      if ((message.presetMask & static_cast<uint8_t>(1U << index)) != 0) {
+        persistenceService.queuePresetSave(
+            index, message.presetColors[index], message.presetTimes[index]);
+      }
+    }
+    const uint8_t savedPresetMask = persistenceService.process(millis(), model);
+    for (uint8_t index = 0; index < ControllerModel::kPresetCount; ++index) {
+      if ((savedPresetMask & static_cast<uint8_t>(1U << index)) != 0) {
+        controllerMessages.notifyPresetSaved(index);
+      }
+    }
   }
 }
 
@@ -228,10 +305,11 @@ void setup() {
   touch.Set_Rotation(Config::kDisplayRotation);
 
   startControllerTask(monitorTouchInput(), "touch input");
-  startControllerTask(updateEffects(), "LED effects");
+  startControllerTask(processUiActions(), "UI actions");
+  startControllerTask(updateLighting(), "LED effects");
   startControllerTask(updateEffectUi(), "effect UI");
   startControllerTask(persistStableManualColor(), "persistence");
-  if (!AudioFeedback::start(g_touchI2CBus)) {
+  if (!AudioFeedback::start(g_touchI2CBus, controllerMessages)) {
     Serial.println("FATAL: unable to start audio coroutine");
   }
 }

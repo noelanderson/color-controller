@@ -41,7 +41,10 @@ class ColorPersistenceService {
    * This method is non-blocking apart from the underlying Preferences call and
    * is intended to run at the persistence task cadence.
    */
-  void process(uint32_t now, const ControllerModel& model);
+  /**
+   * @return Bit mask of preset slots durably written during this call.
+   */
+  uint8_t process(uint32_t now, const ControllerModel& model);
 
  private:
   PersistentState state_;

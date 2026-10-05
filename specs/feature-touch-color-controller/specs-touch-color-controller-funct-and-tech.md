@@ -79,16 +79,19 @@ The firmware has the following responsibilities:
 
 1. `ColorController.ino` is the composition root for hardware initialization and cooperative tasks.
 2. `ControllerModel` owns color, brightness, power, presets, and the active output mode.
-3. `InteractionController` is the sole touch-hardware reader and forwards samples to `TouchDispatcher`.
+3. `InteractionController` is the sole touch-hardware reader and returns actions
+   to `monitorTouchInput()`, which publishes them to a bounded queue.
 4. `TouchDispatcher` offers normalized touch-down data to each registered control and captures the sole claimant.
-5. Controls own their gesture state and emit `UiAction` values; `UiActionProcessor` coordinates side effects.
-6. `UiRenderer` and `UiLayout` own framebuffer rendering, panel transfers, and named geometry.
-7. `LightingOutput` owns addressable LED outputs, reactive state, and the live effect preview.
-8. `ColorPersistenceService` coordinates delayed and queued writes through `PersistentState`.
-9. `ColorMath` and `ReactiveLighting` provide host-tested color, animation, and envelope calculations.
-10. `AudioFeedback` runs ES8311 speaker output and onboard microphone input over duplex I2S.
-11. SimpleAwait C++20 tasks schedule touch, effects, effect UI, audio, and persistence.
-12. The ST77922 display/touch drivers are consumed from the supplied vendor resource pack.
+5. Controls own their gesture state and emit `UiAction` values; after startup
+   restoration, the application coroutine is the sole model writer.
+6. `UiActionProcessor` mutates the model and publishes coalesced messages without performing device I/O.
+7. The UI coroutine exclusively drives `UiRenderer`; `UiLayout` owns named geometry.
+8. The lighting coroutine exclusively drives `LightingOutput`, addressable LED outputs, reactive state, and the live preview.
+9. The persistence coroutine exclusively drives `ColorPersistenceService` and `PersistentState`.
+10. `ColorMath` and `ReactiveLighting` provide host-tested color, animation, and envelope calculations.
+11. The audio coroutine exclusively owns ES8311/I2S and publishes the latest microphone amplitude.
+12. Six SimpleAwait C++20 tasks schedule touch, application actions, lighting, UI, audio, and persistence.
+13. The ST77922 display/touch drivers are consumed from the supplied vendor resource pack.
 
 The repository-owned `AddressableLedStrip` Arduino library provides the minimal
 WS2812-compatible GRB encoder and ESP32 RMT transport. The repository-owned
@@ -158,7 +161,7 @@ driver transfers that framebuffer to the QSPI display.
 - The vendor examples identify ST77922 QSPI display pins, touch I2C pins, onboard addressable LED GPIO 40, and landscape rotation behavior.
 - P2 exposes GPIO 45 and GPIO 46, but ESP32-S3 GPIO 46 is input-only. The output configuration defaults to GPIO 40 and one pixel, with documented constants for migration to GPIO 45.
 - Use fixed-memory SimpleAwait tasks for all runtime scheduling; keep Arduino
-  `loop()` limited to polling the scheduler.
+  `loop()` limited to `simpleawait::poll_and_wait()`.
 
 ---
 
@@ -262,8 +265,9 @@ driver transfers that framebuffer to the QSPI display.
   behavior into their owning controls.
 - [COMPLETED] Step 9.4 - Extract pointer capture and release debounce into
   `TouchDispatcher`, preserving one control for the complete contact.
-- [COMPLETED] Step 9.5 - Extract application side effects into
-  `UiActionProcessor` and retain one SimpleAwait touch task as the sole hardware reader.
+- [COMPLETED] Step 9.5 - Route touch intent through a bounded action queue;
+  retain one touch task as the sole hardware reader and one application task as
+  the sole steady-state model writer after startup restoration.
 - [COMPLETED] Step 9.6 - Add host coverage for capture/debounce and complete
   onboard/external firmware, documentation, and diagram validation.
 - [COMPLETED] Step 9.7 - Repeat the P1-P6, wheel, slider, and power smoke test on the

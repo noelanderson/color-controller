@@ -71,10 +71,11 @@ Host-side tests, from a Visual Studio Developer PowerShell:
 ```powershell
 New-Item -ItemType Directory -Force build | Out-Null
 cl /std:c++20 /EHsc `
-  /Fo:build\color_math_tests.obj `
-  /Fe:build\color_math_tests.exe `
-  tests\color_math_tests.cpp
-.\build\color_math_tests.exe
+  /Fo:build\ `
+  /Fe:build\controller_tests.exe `
+  tests\controller_tests.cpp `
+  src\ColorController\UiActionProcessor.cpp
+.\build\controller_tests.exe
 ```
 
 Firmware build:

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 // Override at build time to size the external P2 addressable LED array; 0 disables it.
@@ -32,8 +33,8 @@ constexpr uint8_t kAudioI2sDinPin = 16;
 constexpr uint8_t kAudioCodecI2cAddress = 0x18;
 constexpr uint32_t kAudioSampleRate = 16000;
 constexpr uint16_t kAudioBeepFrequencyHz = 1800;
-constexpr uint32_t kAudioBeepDurationMs = 70;
-constexpr uint32_t kAudioBeepGapMs = 50;
+constexpr uint32_t kAudioBeepDurationMs = 30;
+constexpr uint32_t kAudioBeepGapMs = 25;
 constexpr uint32_t kAudioCodecResetMs = 20;
 constexpr uint32_t kAudioServicePollMs = 5;
 constexpr uint16_t kAudioDmaFrames = 64;
@@ -42,11 +43,13 @@ constexpr int16_t kAudioToneAmplitude = 12000;
 constexpr int kAudioCodecVolume = 70;
 constexpr uint32_t kTouchPollMs = 5;
 constexpr uint32_t kEffectFrameMs = 25;
+constexpr uint32_t kUiServicePollMs = 25;
 constexpr uint32_t kEffectUiFrameMs = 200;
 constexpr uint32_t kRainbowCycleMs = 12000;
 constexpr uint32_t kRainbowBreathMs = 5000;
 constexpr uint32_t kManualColorSaveDelayMs = 120000;
 constexpr uint32_t kPersistencePollMs = 250;
 constexpr uint32_t kPersistenceRetryMs = 5000;
+constexpr size_t kUiActionQueueCapacity = 8;
 
 }  // namespace Config

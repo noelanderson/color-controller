@@ -1,24 +1,20 @@
 #pragma once
 
-#include "ColorPersistenceService.h"
+#include "ControllerMessages.h"
 #include "ControllerModel.h"
-#include "LightingOutput.h"
 #include "UiAction.h"
 
-class UiRenderer;
-
 /**
- * Application boundary between reusable controls and device side effects.
+ * Application boundary between reusable controls and controller state.
  *
- * The processor updates the model first, then coordinates LED output,
- * persistence, audio feedback, and the smallest required redraw. It owns none
- * of those collaborators; all references must outlive it.
+ * The application coroutine is the sole caller. The processor updates the
+ * model and publishes fixed-memory messages; hardware-owning coroutines consume
+ * those messages independently.
  */
 class UiActionProcessor {
  public:
-  UiActionProcessor(ControllerModel& model, LightingOutput& lighting, UiRenderer& renderer,
-                    ColorPersistenceService& persistence)
-      : model_(model), lighting_(lighting), renderer_(renderer), persistence_(persistence) {}
+  UiActionProcessor(ControllerModel& model, ControllerMessages& messages)
+      : model_(model), messages_(messages) {}
 
   /**
    * Applies one action synchronously.
@@ -36,7 +32,5 @@ class UiActionProcessor {
   void activateMode(OutputMode mode);
 
   ControllerModel& model_;
-  LightingOutput& lighting_;
-  UiRenderer& renderer_;
-  ColorPersistenceService& persistence_;
+  ControllerMessages& messages_;
 };
