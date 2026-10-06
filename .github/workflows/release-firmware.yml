@@ -1,0 +1,82 @@
+name: Release firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish ESP32-S3 firmware
+    runs-on: ubuntu-latest
+    env:
+      ESP32_INDEX_URL: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+      ESP32_BOARD: esp32:esp32:esp32s3
+
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "::error::Release tags must use vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-SUFFIX."
+            exit 1
+          fi
+
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core
+        run: |
+          arduino-cli core update-index --additional-urls "$ESP32_INDEX_URL"
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls "$ESP32_INDEX_URL"
+
+      - name: Compile release firmware
+        run: |
+          mkdir -p build/release
+          board_options="FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,"
+          board_options="${board_options}PSRAM=opi,USBMode=hwcdc,CDCOnBoot=cdc"
+          arduino-cli compile \
+            --fqbn "${ESP32_BOARD}:${board_options}" \
+            --libraries "./libraries" \
+            --output-dir "./build/release" \
+            "./src/ColorController"
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          source_image="build/release/ColorController.ino.merged.bin"
+          asset_name="color-controller-${GITHUB_REF_NAME}.merged.bin"
+          test -s "$source_image"
+          cp "$source_image" "build/release/$asset_name"
+          (
+            cd build/release
+            sha256sum "$asset_name" > "$asset_name.sha256"
+          )
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          asset_name="color-controller-${GITHUB_REF_NAME}.merged.bin"
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "build/release/$asset_name" \
+            "build/release/$asset_name.sha256" \
+            --verify-tag \
+            --generate-notes \
+            --title "Color Controller $GITHUB_REF_NAME" \
+            "${release_flags[@]}"

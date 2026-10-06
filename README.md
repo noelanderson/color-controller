@@ -188,6 +188,27 @@ To enable an external strip without the wrapper:
 The GitHub Actions firmware workflow publishes the merged image as a
 30-day artifact named `color-controller-merged-<commit-sha>`.
 
+### Create a release
+
+Push a semantic version tag to build a permanent GitHub Release from that exact
+revision:
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Tags must use `vMAJOR.MINOR.PATCH` or a prerelease suffix such as
+`v1.1.0-rc.1`. The release workflow rebuilds the onboard-only firmware, creates
+generated release notes, and attaches:
+
+- `color-controller-<tag>.merged.bin`
+- `color-controller-<tag>.merged.bin.sha256`
+
+Prerelease tags automatically create GitHub prereleases. The merged image is a
+complete flash image for address `0x0`; installing it erases NVS and resets
+stored colors.
+
 ## Connecting an external LED strip
 
 Build with the strip's exact pixel count and connect its data input to GPIO45 on
