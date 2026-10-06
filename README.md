@@ -4,12 +4,16 @@
 [![Publish firmware reference](https://github.com/noelanderson/color-controller/actions/workflows/publish-doxygen.yml/badge.svg)](https://github.com/noelanderson/color-controller/actions/workflows/publish-doxygen.yml)
 
 Touch Color Controller turns an Elecrow 3.5-inch ESP32-S3 capacitive display
-(DLE06235B) into a wall-panel controller for addressable LED lighting.
+([DLE06235B](https://www.elecrow.com/3-5-esp32-s3-display-320x480-capacitive-ips-touchscreen-with-speaker-mic-bat-interface-supports-ai-voice-chat.html)) into a wall-panel controller for addressable LED lighting.
+
+In addition to the Elecrow device the code should work unaltered on the Freenove ESP32 Touch Display ([FNK0104A](https://store.freenove.com/products/fnk0104))
 
 The firmware controls the onboard WS2812-compatible LED and can drive an
 optional external strip from GPIO45. It provides editable color presets,
 rainbow and microphone-reactive modes, brightness and power controls, and
 persistent colors.
+
+Supporting different lighting, such as a RGBW non-addressable light strip should be a simple modification of the lighting output.
 
 ## Features
 
